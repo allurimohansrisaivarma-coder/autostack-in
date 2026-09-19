@@ -1,163 +1,235 @@
 # AutoStack IN
 
-**Team AutoMaters | Smart India Hackathon 2026 | Smart Automation**
+**Team AutoMaters · SIH 2026 · SIH26193 / Student Innovation · Smart Automation**
 
-A desktop assistant that notices repetitive office work, generates automation code, tests it safely, and lets the user decide when to run it. A **workflow** is a repeatable sequence of tasks.
+A background desktop assistant that discovers repetitive office work, generates automation code, tests it in isolation, and lets the user approve and run it. A **workflow** is a repeatable sequence, such as updating a client register and preparing a follow-up message.
 
-**Current status: interactive frontend prototype.** Background observation, AI generation, security checks, and real execution are planned, not implemented.
+**The existing React code is a visual/interaction demo of the intended product.** Its example events and results are not the implementation specification. Everything below is planned unless explicitly marked existing. Security means enforced controls and tested limits; software cannot be guaranteed foolproof.
 
-## 1. The experience we are building
+New to the codebase? Use [file.md](file.md) for a guide to each project file and [the Phase 1 confirmation checklist](docs/phase-1.md#your-phase-1-confirmation-checklist) to verify the current proofs.
 
-Target **Windows, macOS, and Linux**. With permission, start at sign-in and keep running when the dashboard closes. A tray menu provides **Open dashboard, Pause observation, and Quit**.
+## 1. Product commitments
 
-1. **Choose what to observe.** The user permits specific sites and folders and can pause or revoke access.
-2. **Discover repetition.** Find daily, weekly, or monthly patterns across sessions, with evidence users can correct or dismiss.
-3. **Notify the user.** Save a dashboard notification and show a desktop alert when permitted, including steps, estimated savings, and requested access.
-4. **Prepare the automation.** A cloud AI model proposes a plan and generates code using operations our app allows.
-5. **Approve a sandbox test.** A sandbox is an isolated test environment. With permission, run the code on test data and check behavior and security.
-6. **Review and activate.** Show the explanation, code, output preview, permissions, and test report. Require separate approval after all checks pass.
-7. **Run when needed.** Select an input under **My Workflows → Run now**. Reuse the approved code without regenerating it.
-
-Automatic discovery does **not** mean automatic execution. Scheduling is a later opt-in feature. Sharing a template will also be separate from activating it privately.
-
-## 2. Our first complete workflow
-
-**Sample client records → validate details → update a local spreadsheet → prepare follow-up drafts.**
-
-Use invented clients and demonstrate the entire discovery-to-execution flow above. Initially, drafts appear inside our app; no email account or actual sending is needed.
-
-Observe selected browser sites and a chosen folder first. Folder changes cannot explain every action inside Excel; detailed desktop-app observation needs later integrations.
-
-Savings must come from measured work, not invented dashboard numbers:
-
-> Estimated monthly saving = number of runs × (manual effort per run − remaining review effort per run) − maintenance effort.
-
-Show the observation count, assumptions, and a range; separate estimates from savings measured after real runs.
-
-## 3. What already works
-
-| Area | Current frontend capability |
+| Requirement from our presentation and discussions | Delivery plan |
 | --- | --- |
-| Dashboard | Summary cards, sample operations, an illustrative chart, and navigation. |
-| Discovery | Select sample patterns, inspect steps and estimates, and enter the creation screen. |
-| Registry | Search sample templates and rank them using a fixed team profile. |
-| Workflows | Browse sample workflows and view their status/details. |
-| Create Automation | Five-step interface, start/pause simulated monitoring, select candidates, and replay simulated sandbox results. |
-| Trust Log | Display sample audit records. |
+| Background operation without an open window | Opt-in startup at sign-in, independent worker, tray controls, optional React dashboard. Closing the window does not quit the worker. |
+| Cross-platform | Windows, macOS, and Linux clients; publish a tested feature/OS matrix. Individual integrations may have narrower support. |
+| Consent-based observation and pattern discovery | Defined collectors, local event matching, visible evidence, pause/revocation/deletion controls. |
+| Code generation, savings estimates, notifications | Cloud-assisted generation, evidence-based savings, persistent dashboard items, and permitted desktop alerts. |
+| Testing before use | Separate approval to test, enforced sandbox checks, then separate approval to activate the tested version. |
+| Complete office workflows | Confirm data mappings/rules, then coordinate supported steps across apps, pausing for required human decisions. |
+| National automation registry | Later, share reviewed templates without office records or credentials; receiving offices adapt and retest. |
+| Free development | Open-source tools, existing hardware, synthetic data, and limited free model quota; no automatic paid fallback. |
 
-Events, scores, savings, tests, hashes, and signatures are **demo data**. Some buttons are placeholders. “Publish” only changes the screen; monitoring stops when its screen is left. Nothing is saved permanently.
+The presentation's market figures and external case studies explain the opportunity; they are not project results. National-scale operation and universal app coverage are not prototype claims.
 
-There is **no backend, database, AI connection, real execution/security system, desktop notification, or live registry**. Replace the current “Publish” step with private review/activation for the initial release.
+## 2. What exists today
 
-## 4. Software, services, and their roles
+| Existing screen | Demonstrated interaction |
+| --- | --- |
+| Dashboard | Navigation, sample activity, summary cards, illustrative chart. |
+| Discovery | Select sample patterns and inspect steps/estimates. |
+| Registry | Search examples; rank against a fixed example team profile. |
+| Workflows | Browse example workflows and status/details. |
+| Create Automation | Five-step interaction, simulated capture, candidate selection, timed sandbox playback. |
+| Trust Log | Sample audit records. |
 
-An **API** lets programs communicate. Everything below is local except the cloud model and optional code collaboration.
+The React demo has no real observation, AI call, backend, persistent database, sandbox, security enforcement, notification service, or live registry yet. Clipboard messages, spreadsheet differences, confidence scores, tests, signatures, and savings shown there are illustrative. Monitoring stops when its screen is left; “Publish” changes UI state only. Reuse the appearance, replace simulated behavior, and add private activation before optional sharing.
 
-| Software/service | Role | Status and development cost |
+**Phase 1 has started separately:** the [feasibility kit](docs/phase-1.md) includes a working browser connector for one local synthetic page, saved CSV/XLSX comparison, validated event contracts, automated tests, and reference screenshots of the existing design. Its code is organized into `backend/`, `browser-extension/`, `shared/`, and `tests/`. These proofs are not connected to the dashboard and do not yet implement background observation or execution. See [evidence and remaining checks](docs/phase-1-status.md); Docker/paired-runner tests are deferred, so Phase 1 is not complete.
+
+## 3. User journey and approval states
+
+1. **Enable observation:** select supported sites/files and permissions. Tray controls expose status, Pause, Open dashboard, and Quit.
+2. **Receive a suggestion:** background discovery saves a dashboard item with evidence, proposed steps, missing information, and provisional savings. Desktop alerts are optional; dismissal never means approval.
+3. **Confirm the plan:** review field mappings, update rules, output targets, and cloud-bound context. Generate a versioned draft from this specification.
+4. **Approve testing:** review the code/description and test data, then authorize an isolated sandbox run.
+5. **Review results:** inspect checks, output differences, limitations, code, and permissions. Failed, missing, or timed-out required checks block activation.
+6. **Approve activation:** approve the exact tested code, dependencies, connectors, and permissions.
+7. **Run now:** select an input and explicitly start the approved workflow. Reuse tested code; show progress, cancellation, outcomes, and recovery options.
+
+**States:** Detected → Plan confirmed → Draft → Awaiting test approval → Testing → Passed/Blocked → Awaiting activation → Ready → Running → Completed/Failed/Cancelled. The backend enforces transitions. Changes to code, mappings, targets, permissions, dependencies, connectors, or execution policy invalidate approval and require retesting.
+
+Input records/files and run dates are declared parameters within the approved resource scope. New data within that scope does not require regeneration; different output resources, mappings, or broader access do require retesting and approval. A file path supplied by a user or model never grants access by itself.
+
+Observation, content reading, cloud/runner transfer, testing, activation, on-demand runs, and publication are distinct permissions. Scheduling is a later opt-in feature. Pausing observation stops collection; cancelling a run is separate. Revoking execution access stops dependent operations.
+
+## 4. Observation: what we can actually see
+
+First workflow: **sample client webpage → selected CSV/XLSX tracking file → in-app follow-up draft**. Use invented clients and real observed actions; never unlock candidates using timers.
+
+A **connector** is code written for a supported app or format. Define its coverage before claiming a workflow is supported.
+
+| Source | Implementation and evidence | Boundary |
 | --- | --- | --- |
-| React + Vite + Node.js/npm | Build and run the dashboard and its development tools. | Already used; free. |
-| Electron | Package the dashboard as a desktop app with tray controls, startup, and notifications. | Planned; [free and open source](https://www.electronjs.org/docs/latest/why-electron). |
-| Python + FastAPI | Background worker and our API for workflows, approvals, and runs. | Planned; free. |
-| SQLite | Store observations, workflow versions, approvals, and history. | Planned; free. |
-| Browser extension APIs + native messaging | Observe permitted browser actions and communicate with the local agent. Start with Chrome/Edge. | Planned; local development is free. |
-| Gemini API + Google AI Studio | Get an API key; interpret workflow summaries and generate code. | Planned; limited free tier. |
-| Python CSV tools + openpyxl | Read/write selected CSV and Excel files without requiring an Excel subscription. | Planned; free. |
-| Playwright | Automate supported browser steps and test demo pages when needed. | Planned; free. |
-| Docker Engine/Desktop | Run the isolated test runner locally. | Planned; Desktop is free for eligible educational/personal use. |
-| pytest + Bandit + pip-audit | Test behavior, flag risky code, and check software dependencies for known vulnerabilities. | Planned; free. |
-| Operating-system credential store | Keep API keys/tokens out of the interface, generated scripts, and repository. | Planned; built into the OS, with a supported adapter. |
-| Git + GitHub | Share code, review changes, and track work. | Git is used; GitHub Free is sufficient for basic collaboration. |
+| Supported browser page | Allowlisted Chrome/Edge extension records known actions: opening a client, submitting a supported form, initiating an export. | Clicks alone do not prove success; require a supported success signal. No automatic visibility into every site, frame, or desktop app. |
+| Selected CSV/XLSX | A watcher notices a save; a parser compares stable saved versions using the confirmed client-ID column. Report changed fields and added/removed rows. | Requires permission to read contents. Shows saved differences, not unsaved edits, clipboard use, or exact gestures. |
+| Our draft editor | Record actual draft saves linked to the client ID. | Initial drafts stay in-app; no account access or sending. |
+| Later Excel/email connectors | Excel add-in events where supported; Gmail/Graph reports for explicitly authorized operations. | Separate implementation, account/platform permissions, and tests. |
 
-The model proposes a plan, code, and permissions; our backend validates them. AI cannot approve itself. Select the Gemini model after checking free availability and sample-task quality; keep the provider replaceable.
+Wait for stable file content; coalesce duplicate notifications and retry locks/incomplete writes within a bounded interval. Failed parses are gaps. Row reordering is not a data update; missing/duplicate IDs make matching ambiguous. Never infer an unobserved mental action such as “read and understood a document.” Platform limits: [Chrome content scripts](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts), [Excel events](https://learn.microsoft.com/en-us/office/dev/add-ins/excel/excel-add-ins-events).
 
-**Later options:** Gmail API/Microsoft Graph for email drafts, Google Sheets API for online sheets, and PostgreSQL/Supabase plus our registry API for sharing. Check permissions and costs first. GST, Aadhaar, banking, and government-portal API access is not assumed.
+**Event contract:** unique ID, capture order/time and processing time, connector/version, action, permitted resource alias, locally protected client-matching token, changed field names, success/ambiguity flag. Raw values are not event-log defaults; permitted content can be read locally for comparison using protected, short-lived snapshots. Password capture, system-wide clipboard/keystroke logging, and screenshots are outside the initial scope.
 
-## 5. Free development and data boundaries
+Collectors show available/paused/disconnected/error. Missing evidence is never invented. Exclude AutoStack's own actions so the detector cannot learn from its own automated runs.
 
-**Target: zero software/service fees**, using existing computers/internet, local tools, synthetic records, and Gemini's free tier. No paid hosting, domain, cloud sandbox, or Office subscription is required.
+## 5. Pattern detection: the first algorithm
 
-- Free model availability and quotas vary. Cache generated workflows, limit retries, and pause when quota is exhausted. **Never automatically enable billing or a paid fallback.** [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing)
-- Google's unpaid terms allow content use for product improvement. Send only synthetic examples and permitted, minimized descriptions; never real client records, credentials, or private documents. [Gemini terms](https://ai.google.dev/gemini-api/terms)
-- Docker Desktop is free for eligible educational use; future government/enterprise customers need a licensing check. Suitable hardware and virtualization are required. [Docker licensing](https://docs.docker.com/subscription-billing/desktop-license/)
-- Paid models such as OpenAI, hosting, public distribution/signing, or test hardware may cost money later. They are outside the free prototype requirement.
+A local detector counts recurring **ordered action sequences**. The cloud model explains candidates and proposes automation; it does not invent observation evidence.
 
-## 6. Security rules we must implement
+1. **Group task instances automatically.** Opening a supported client record starts an instance; saving its linked draft requests completion. Allow an initial five-second grace period for pending file parsing; order saved-file changes by captured save time, not parser finish time. Count only successful stable comparisons; unresolved timing stays ambiguous. Link by confirmed client ID and initially handle one client at a time. After ten inactive minutes, mark unfinished instances incomplete. Flag interleaved work. Guided demonstrations are optional; normal background discovery needs no recording button.
+2. **Normalize actions.** Remove duplicate events and incidental navigation. Replace particular IDs with roles, retaining meaningful action order, changed fields, and file structure. Count each completed instance once. The first expected sequence is `record_opened → spreadsheet_row_updated → draft_saved`.
+3. **Group matching sequences.** Group identical normalized sequences with compatible resource roles/columns. Suggest after **three completed, unambiguous instances involving at least two sample clients**, with actual saved changes. Refreshes, duplicate event delivery, and incomplete work do not count.
+4. **Explain evidence.** Show “Observed 3 times,” dates, matching steps, incomplete attempts, and gaps. These are initial configurable engineering thresholds, not probability estimates. No “91% confidence.” Unordered Jaccard similarity alone cannot establish a workflow. Approximate sequence matching comes later with evaluated rules.
+5. **Respect calendar evidence.** Accelerated demos prove repetition, not daily/weekly recurrence. Show observed dates separately from user-confirmed frequency. Learned schedules require real calendar history and validation.
 
-**A passed test permits review; user approval permits only the actions tested.** Enforce these rules in the backend and runner.
+**Acceptance:** human-performed sample work produces the expected suggestion only after the threshold. Reject reordered steps, unrelated IDs, duplicate events, missing steps, ambiguous work, and self-generated runs. Evaluate on separate examples not used for tuning; report false suggestions and missed patterns with sample counts. Passing these cases validates this supported workflow, not every office process.
 
-| Protection | What it means in practice |
-| --- | --- |
-| Consent and privacy | Only allowed sites/folders; never capture passwords. Screenshots and broad keystroke logging are off by default. Provide pause, revocation, retention limits, deletion, and protected storage. |
-| Treat content as data | Instructions hidden in a client record, webpage, or generated response must not override app rules or permissions. |
-| Restrict generated code | Allow approved operations and fixed dependency versions. Check for secrets/unsafe code; reject arbitrary shell commands and automatic software installation. |
-| Isolate every test | Disposable test data, non-admin execution, read-only base, resource/time limits, and blocked network. No live credentials, Docker control socket, or broad host-folder access. |
-| Test failures too | Test missing columns, bad records, duplicates, repeat runs, interruptions, recovery, unauthorized access, and malicious instructions. The team defines expected outputs independently of AI. |
-| Enforce approval | Bind approval to tested code, dependencies, and permissions. Changes require retesting/reapproval. Missing, failed, or interrupted checks block activation. |
-| Constrain actual runs | Keep generated code isolated; trusted app operations handle approved file/account access. Back up files, prevent duplicates, support cancellation, and stop on unexpected input changes. |
-| Keep evidence | Log redacted events, versions, tests, approvals, and outcomes. Show changes and recovery options. Sent messages cannot reliably be undone. |
+## 6. From repeated actions to correct code
 
-Authenticate local API/desktop connections. Block execution if isolation is unavailable. Scans and passing tests reduce risk; they do not guarantee complete safety.
+Observation does not reveal every business rule. Confirm the matching ID, source-to-column mappings, allowed fields, append/update behavior, duplicate handling, draft template, and output locations. Show synthetic before/after examples; unresolved rules block generation.
 
-## 7. Development phases
+**Initial example rule:** use `ClientID`, `Name`, `Email`, `FollowUpDate`, and `Status`. Prepare drafts for records due on/before the selected run date with a user-approved status. Update matching tracking rows to `Draft prepared`, never `Sent`. Missing/duplicate IDs or invalid required fields stop the batch with an explanation; no guessed recipients or silent overwrites. Users confirm these rules before use.
 
-Complete the usable workflow before building the registry. Each phase has a visible completion condition; security is part of every phase.
+The model proposes a structured plan, Python code, operations, and tests. The backend validates format/policy; the team supplies independent expected-output tests. Store the confirmed specification, code, dependency versions, permissions, and results as a versioned artifact. Structured output enforces format, not correctness. [Gemini structured outputs](https://ai.google.dev/gemini-api/docs/structured-output)
 
-| Phase | Build | Finished when |
+Generated code transforms supplied inputs and proposes structured edits/drafts. Handwritten, trusted connectors hold credentials and apply approved changes. Later account/browser steps use named, allowlisted operations, not arbitrary URLs or shell access. Portal authorization, CAPTCHA/MFA, payments, and statutory submissions require supported integrations and appropriate human involvement.
+
+**Savings:** estimate a range using `runs/month × (manual active effort − remaining review effort) − maintenance effort`. Exclude long idle gaps; ask users to confirm uncertain timing/frequency. Display sample counts/assumptions and later compare with measured run/review effort. Demo cycles are not proven monthly savings.
+
+## 7. Execution without Docker on every computer
+
+A **runner** executes generated code inside isolation. Build one Runner API with two deployment modes. Tests and real runs use the same versioned code, runtime, dependencies, and security policy.
+
+| Mode | Execution location | Requirement |
 | --- | --- | --- |
-| **1. Foundation** | Label demo data; define states, permissions, sample records, expected outputs, and risks. | Team agrees the flow and blocked actions. |
-| **2. Background app** | Desktop shell, worker, storage, consent, tray controls, optional startup. | Worker survives dashboard closure; settings/history survive restart. |
-| **3. Discovery** | Real supported capture, pattern detection, savings estimates, notifications. | Repeated sample work produces a suggestion users can inspect or dismiss. |
-| **4. AI generation** | Free Gemini connection, minimized prompts, constrained code, versions. | Reviewable code is produced; invalid output/quota failures trigger no execution. |
-| **5. Sandbox gates** | Isolation, functional/security tests, independent expected outputs, reports. | Valid cases pass; unsafe/broken cases cannot activate. |
-| **6. Approved execution** | Review, activation, Run now, restricted writes, history, cancellation/recovery. | Full client demo works; reruns avoid duplicates and unauthorized actions are blocked. |
-| **7. Cross-platform validation** | Package/test all three OS targets, including permissions, notifications, resource use, and restart. | Full demo passes on each supported OS; gaps are documented. |
-| **8. Shared registry** | Optional sanitized templates, search, versions, import, retesting. | Another installation adapts/retests a template without sharing private records. |
+| Local | Hardened Docker container on the user's computer. | Compatible permitted installation, available engine, passing security preflight. |
+| Paired office/team runner | Hardened container on a trusted existing computer over an approved network. | Endpoint needs no Docker/virtualization. Pair identities, authenticate/encrypt connections, and obtain consent for selected data leaving the device. |
+| No available approved runner | Discovery, notifications, and review remain usable. | Testing/execution disabled with an actionable explanation. No direct-Python fallback. |
 
-**Team work areas:** desktop/UI, capture/detection, backend/AI, and sandbox/security/testing. Assign owners and agree data formats together; review changes and update feature status here. Test portability throughout development. Begin the registry only after phases 1–7 pass.
+Shared mode removes Docker from endpoints, not the entire system. It needs a reachable, maintained host and permitted transfer. Use an existing team computer and synthetic data for free development. An organization forbidding installation or transfer needs an approved deployment arrangement; there is no universal bypass.
 
-## 8. More workflow ideas for Indian offices
+Expose only our per-user authenticated job API, **never Docker controls**. Separate job storage, apply quotas, and forbid client-selected mounts/images/security flags. Pin runner identity; verify report signatures and job/code/input/runtime/policy identifiers. Endpoint clients must not receive Docker administration credentials. [Docker access guidance](https://docs.docker.com/engine/security/protect-access/)
 
-Future ideas, not implemented features. Keep approvals, legal submissions, payments, and external communication under human control.
+For real runs, send only consented necessary input copies. Return structured proposed edits/drafts, not arbitrary executable artifacts. The local agent validates schema, target fields, output sizes, and unchanged original input before applying approved operations. Reject macros/unsupported workbook types and unexpected executable spreadsheet formulas. Credentials remain outside generated code.
 
-| Office/task | Possible workflow |
+Delete runner payloads after acknowledged completion; expire abandoned jobs within 24 hours. Runner administrators can potentially access transferred data: LAN hosting is still another machine. On disconnect, reconcile job status before retrying; never blindly repeat effects. New runner identities require pairing/revalidation.
+
+Without internet, local capture/detection/review continue; new cloud generation waits. Approved deterministic workflows can run without model calls if their runner/connectors are available. No runner means no generated-code execution. Free-quota exhaustion pauses generation without switching to paid service.
+
+## 8. Security gates and failure handling
+
+Enforce controls in the backend/runner. A UI badge, signature, scanner, or user approval alone is not proof of safety.
+
+| Gate | Required behavior |
 | --- | --- |
-| Client follow-up — first demo | Read records → update contact/status sheet → prepare follow-up drafts. |
-| MSME invoice tracking | Read approved invoice files → update receivables → flag overdue items → draft reminders. |
-| Vendor onboarding | Check a supplied document checklist → flag missing items → update vendor register → prepare a request draft. |
-| GST/TDS preparation | Organize supplied purchase/sales records → identify missing fields or mismatches → prepare a review pack for the accountant; no automatic filing. |
-| HR attendance and leave | Combine approved attendance exports → flag inconsistencies → prepare a monthly review sheet. |
-| Employee joining | Check joining-document completeness → update checklist → prepare welcome and missing-document drafts. |
-| Procurement | Collect quotation details → build a comparison sheet → prepare an approval request; no automatic purchase. |
-| Stock and dispatch | Combine stock/delivery exports → identify low stock or pending deliveries → prepare a replenishment/follow-up list. |
-| Expense reimbursement | Sort submitted receipts → match employee claims → flag duplicates or missing evidence → prepare a review sheet. |
-| Government/college administration | Update an inward/outward correspondence or application register → identify pending files → prepare a status report. |
-| Management reporting | Combine weekly department spreadsheets → generate a summary → prepare a report draft. |
+| Consent and storage | Separate observation/content/model-transfer/runner-transfer/execution scopes. Default retention: 30 days for observations, 90 for reports/history, configurable with deletion controls. Encrypt sensitive local records; keep keys in OS credential storage. |
+| Static checks | Validate approved operations/imports, secrets, code structure, and dependency vulnerabilities. Pin reviewed dependencies; no generated shell commands, dynamic code loading, or package installation. Treat pages, records, and model output as untrusted. |
+| Isolation | Non-admin process, read-only base, dropped privileges, OS security profile, CPU/memory/process/time/output limits, minimal mounts, no host/control sockets. Generated code has no network or account credentials; trusted connectors mediate permitted operations. Check actual enforcement; Docker defaults alone are insufficient. |
+| Test suite | Expected outputs; malformed records; missing columns; duplicate IDs; repeated runs; interruptions; schema changes; malicious instructions; forbidden file/network access; resource exhaustion; secret leakage; recovery. Use synthetic data/mocks, with separately approved test accounts for later connectors. |
+| Approval binding | All required checks pass for the exact artifact/runtime/connector policy. Record approval; invalidate it after relevant changes. Check permission again at every run and before each effect. |
+| Safe writes | Stage/validate results, compare original input versions, back up files, and apply bounded changes. Deduplicate business effects: for drafts, use client ID + follow-up purpose/date + destination, recording the resulting draft ID. Keep code/input hashes for evidence, not as the only duplicate key. Reconcile effects after retries, edited inputs, or upgraded workflows; intentional repeats need explicit new occurrences. Stop on locks, concurrent changes, or unexpected schemas. |
+| Partial failure | Durable operation journal, reconciliation before retries, verified unfinished-step recovery. Restore supported local changes where possible. Cancellation stops new actions; it cannot guarantee undoing completed sends/submissions. |
+| Audit | Redacted observations, plans, tests, approvals, runs, failures, and recovery. Hash-linked records expose edits; trusted checkpoints are needed to detect wholesale rewriting. Local logs cannot defeat a fully compromised administrator. |
 
-## 9. Run the frontend today
+Keep Electron's UI isolated with a narrow communication interface; its renderer sandbox is not the generated-code runner. Protect paired connections with authenticated HTTPS. Before external sending, add recipient/content confirmation, explicit send permission, duplicate protection, and connector-specific recovery tests. The mandatory S1–S11 requirements and phase-specific abuse tests in [plan.md](plan.md#mandatory-safety-requirements-and-proof) define the detailed security acceptance criteria, including restricted file parsing, independent test controllers, runner revocation, secondary-copy cleanup, and safe filesystem access.
 
-Only the web prototype is runnable. Install **Node.js 22.12+ within the 22.x line, or a newer supported long-term support (LTS) release**, with npm.
+The SIH demo uses synthetic records. Sensitive production deployment needs a validated threat model and deployment review. Failed/unavailable isolation always blocks execution, including after a previously passing test.
 
-From the repository folder:
+## 9. Software, APIs, and zero-fee development
+
+An **API** is an agreed way for programs to communicate. These are planned components unless marked existing.
+
+| Software/service | Role / cost boundary |
+| --- | --- |
+| React, Vite, Node.js/npm | Existing UI and build/development tools; free. |
+| Electron | Cross-platform window, tray, notifications, startup, local communication; free. |
+| Python + FastAPI | Worker, local detector, permission/state enforcement, local/shared Runner APIs; free. |
+| SQLite + OS credential store | Local workflow/history storage and protected keys; free. Implement encryption explicitly; SQLite alone does not provide it. |
+| Browser extension + native messaging | Capture permitted supported browser actions and relay to the local agent; free development. |
+| File watcher, CSV tools, openpyxl | Observe saves; compare/process permitted spreadsheet data; free, no Excel subscription required. |
+| Gemini API + Google AI Studio | Developer key and cloud generation from approved minimal schemas/synthetic examples. Choose a free-tier model after checking availability and task quality. |
+| Docker Engine/Desktop | Isolated jobs on a local/paired runner; Desktop free for eligible educational/personal use. |
+| pytest, Bandit, pip-audit | Behavior tests, risky-code checks, dependency vulnerability checks; free, supplement isolation. |
+| Playwright | Supported browser operations and integration tests; free, not a desktop recorder. |
+| Git + GitHub | Version control, reviews, basic team collaboration; free options. |
+| Later: Excel add-in, Gmail API, Microsoft Graph, Google Sheets API | Richer capture and authorized account workflows; check individual licenses, permissions, quotas, and platforms. |
+| Later: PostgreSQL / optional Supabase + registry API | Accounts, templates, permissions, versions. Team-hosted PostgreSQL keeps development free; hosted scale is separate. |
+
+Our APIs cover events, candidates, confirmed plans, generation jobs, test approvals/results, activation, runs, and audit history. Authenticate desktop-to-agent communication; keep it local. Keys stay outside React, prompts, generated code, and Git. Keep the model provider replaceable.
+
+**Zero software/service fees is the development target**, conditional on existing hardware/internet and free quota. No paid model, domain, hosted database, or cloud sandbox is mandatory. Cache generated artifacts, cap retries, pause on quota exhaustion, and never automatically enable billing. [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing)
+
+Free Gemini terms allow content use for product improvement. Send no real client values, secrets, or private documents; minimize schemas and replace confidential labels before transfer. Generating from synthetic examples does not require uploading the real records later processed by the runner. [Gemini terms](https://ai.google.dev/gemini-api/terms)
+
+Docker educational eligibility does not guarantee free government/enterprise deployment. Paid models, distribution/signing, hosting, optional account products, and extra hardware may cost money later. Free development is not free production forever. [Docker licensing](https://docs.docker.com/subscription-billing/desktop-license/)
+
+## 10. Development phases and acceptance gates
+
+Each phase produces evidence, not just a screen. Assign owners across UI/desktop, capture/detection, backend/AI, and runner/security. Agree event/API contracts before parallel work.
+
+| Phase | Deliverable | Exit condition |
+| --- | --- | --- |
+| **1. Feasibility and contracts** | Events/specifications, synthetic fixtures, risks, supported-source list, resource limits, local/shared runner trials. | Real browser capture and saved-file comparison work; a paired endpoint without Docker executes a harmless team-written fixture. Generated code remains blocked until later security gates pass. Record blockers before broader promises. |
+| **2. Background foundation** | Shell, worker, SQLite, consent, protected storage, tray, startup, authenticated communication. | UI closure leaves worker running; restart preserves state; pause/revocation/deletion work. |
+| **3. Real capture** | Browser adapter, stable-file parser, draft events, ID linking, deduplication, coverage status. | Human sample work produces attributable events; ambiguous/locked/unrelated files are handled correctly. |
+| **4. Explainable detection** | Ordered-sequence counting, task boundaries, thresholds, evidence, notifications, provisional savings. | Section 5 positive/negative cases pass on real and replayed events; no invented confidence. |
+| **5. Confirmed generation** | Mapping/rule review, sanitized cloud requests, versioned code, quota/provider handling. | Code matches the confirmed sample specification; invalid output/missing rules/quota errors never trigger execution. |
+| **6. Verified runner** | Hardened local/paired modes, independent tests, version-bound signed reports, separate test/activation approvals. | Unsafe cases fail closed; stale/forged reports cannot activate code; no-Docker endpoint completes consented testing. |
+| **7. End-to-end use** | Run now, validated outputs, safe writes, deduplication, audit, cancellation/recovery. | New sample records complete the client workflow; reruns/crashes/disconnections do not silently repeat effects; test paired execution as well as local. |
+| **8. Cross-platform and connectors** | Windows/macOS/Linux matrix, permissions, notifications, resource use, installers, selected connector expansion. | Core flow passes on each supported OS using local or paired execution; each connector has independent permission/failure tests. |
+| **9. Shared registry** | Authenticated publishing, sanitization/review, versions, search, adaptation, recipient testing. | Two installations reuse a template with different mappings without sharing records or inheriting approval. |
+
+Test security and portability throughout. Begin registry implementation after the core flow is reliable through phase 8. Fuzzy matching, schedules, and broader app coverage follow measured results.
+
+## 11. Registry and Indian-office roadmap
+
+**Registry contract:** separate owner permission to publish; review code/schema/dependencies/examples for private information. Share versioned logic, parameter definitions, synthetic examples, compatible connectors, and test evidence—never credentials, real records, organization-specific paths, or inherited permissions. Add ownership, moderation, withdrawal, and version updates. Recipients map their columns/approval rules, supply synthetic local tests, retest, and approve. “Verified” means passed a stated suite/environment, not universal certification.
+
+Ordinary withdrawal stops new imports; a known security revocation also blocks installed affected versions, including offline. Registry outages cannot clear a known block. Imported workflows may continue only within the agreed finite status-freshness policy; show the last status check and require repair/retesting for revoked versions.
+
+| Office use case | Workflow as supported connectors are added |
+| --- | --- |
+| Client follow-up — first implementation | Read sample records → update tracking row → prepare in-app draft. |
+| Invoice / purchase-order checks | Compare approved exports → flag mismatches → prepare finance review sheet. |
+| Receivables | Identify overdue entries → update tracker → draft reminders. |
+| Vendor onboarding | Check document completeness → update register → draft missing-document requests. |
+| GST/PAN and procurement — presentation example | Use an authorized verification source when available → compare vendor details → gather approval evidence → prepare payment request. Format checks are not official verification; no assumed portal access or automatic payment. |
+| GST/TDS preparation | Reconcile supplied records → flag mismatches → prepare accountant review pack. |
+| HR joining / attendance | Consolidate permitted exports → identify missing documents/attendance exceptions → prepare checklists/reports. |
+| Procurement / inventory | Compare quotations or stock thresholds → prepare approval/reorder request. |
+| Expenses | Match receipts to claims → flag duplicates → prepare reimbursement review list. |
+| Government / college administration | Update correspondence/application registers → identify pending items → prepare status reports. |
+| Management reporting | Consolidate department sheets → summarize → prepare distribution drafts. |
+
+Different office formats and local-language messages use reviewed mappings/templates. Financial approvals, statutory submissions, and external sends remain explicit human decisions until separately scoped and validated. Measure actual time/error reductions; do not claim percentages from external case studies.
+
+## 12. Run the existing frontend
+
+Install **Node.js 22.12+ within the 22.x line, or a newer supported long-term support (LTS) release**, with npm. From this repository:
 
 ```sh
-npm ci
-npm run dev -- --host 127.0.0.1
+npm ci --ignore-scripts --prefix frontend
+npm run dev
 ```
 
-Open the URL printed by Vite. The host option keeps access local to your machine. No API key is needed.
+Open Vite's printed URL. The development server binds to this computer only by default. Root commands forward to the frontend package, so you can stay in the repository root. No AI key, Docker, or backend is needed for this visual demo. To install both frontend and browser-test dependencies, use `npm run setup` instead of the first command above.
 
 ```sh
 npm run build
-npm run preview -- --host 127.0.0.1
+npm run preview
 ```
 
 | Existing file | Purpose |
 | --- | --- |
-| `src/main.jsx` | Screens, demo data, and simulated interactions. |
-| `src/styles.css` | Visual styling. |
-| `index.html` | Page entry point. |
-| `package.json` / `package-lock.json` | Commands and reproducible dependency installation. |
+| `frontend/src/main.jsx` | Screens, example data, simulated interactions. |
+| `frontend/src/styles.css` | Styling. |
+| `frontend/index.html` | Web entry point. |
+| `frontend/package.json` / `frontend/package-lock.json` | Frontend dependencies and reproducible installation. |
+| `package.json` | Root shortcuts for setup, dev, build, preview, and tests. It has no dependencies of its own. |
 
-Add backend, extension, API-key, and sandbox setup here when implemented. Never commit credentials or private records. Keep **implemented**, **simulated**, and **planned** status accurate.
+Folders are organized by responsibility: `frontend/` for React, `backend/` for Python logic, `browser-extension/` for capture, `shared/contracts/` for data formats, `tests/` for checks/sample data, `docs/` for detailed guides, and ignored `artifacts/` for generated evidence. See [file.md](file.md) for every file's role.
 
-*Plan and service references reviewed: 19 September 2026. Product label currently follows the frontend (AutoStack IN); AutoMaters is the team name used in the presentation.*
+Use the [Phase 1 setup](docs/phase-1.md) for the synthetic extension/file proofs and tests. Add backend, runner pairing, key, and deployment instructions when implemented. Keep supported OS/connectors, limits, evaluation results, and implemented/planned status current. Never commit credentials or real client records.
+
+*Design reviewed: 19 September 2026. AutoStack IN is the frontend product label; AutoMaters is the presentation's team name. Context: the team's six-slide SIH_Submitted_ppt.pdf and agreed project decisions.*

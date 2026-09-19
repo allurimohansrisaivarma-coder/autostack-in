@@ -1,15 +1,12 @@
 {
+  "name": "autostack-in",
+  "private": true,
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
-  },
-  "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "lucide-react": "latest"
-  },
-  "devDependencies": {}
+    "setup": "npm ci --ignore-scripts --prefix frontend && npm ci --ignore-scripts --prefix tests",
+    "dev": "npm --prefix frontend run dev --",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview --",
+    "test:unit": "python -m unittest discover -s tests/unit -v",
+    "test:browser": "node tests/browser/capture-and-ui.cjs"
+  }
 }
