@@ -29,9 +29,18 @@ def validator(name):
 
 
 def validate_events(events):
+    """Validate a bounded list of events against the contract matching their declared
+    schema_version: 1 = synthetic Phase-1 demo events (unchanged behavior), 2 = real
+    Phase-3 capture observations. Mixed-version lists are rejected (fail-closed)."""
     if not isinstance(events, list) or len(events) > 100:
         raise ValueError("Expected a bounded list of at most 100 synthetic events")
-    event_validator = validator("event")
+    versions = {e.get("schema_version") for e in events}
+    if len(versions) > 1:
+        raise ValueError("Mixed schema_version values in one batch are not allowed")
+    schema_name = {1: "event", 2: "event-v2"}.get(versions.pop() if versions else None)
+    if schema_name is None:
+        raise ValueError("Unknown schema_version")
+    event_validator = validator(schema_name)
     seen = set()
     for event in events:
         event_validator.validate(event)

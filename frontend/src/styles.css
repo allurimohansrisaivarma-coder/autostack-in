@@ -912,3 +912,53 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   .brand { flex: 1; }
   .stepper-row { grid-template-columns: 1fr; }
 }
+
+/* ── Roadmap pages ── */
+.nav-group { margin-bottom: 6px; }
+.nav-group-label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.45; padding: 8px 10px 2px; }
+.card.gated { border: 1px dashed var(--line, #2a3444); opacity: 0.85; }
+.login-wrap { min-height: 80vh; display: flex; align-items: center; justify-content: center; }
+.login-card { width: 380px; display: flex; flex-direction: column; gap: 12px; padding: 22px; }
+.login-card label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.login-card input { padding: 8px 10px; border-radius: 8px; border: 1px solid #2a3444; background: #0d1117; color: #e6edf3; }
+.tier-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.chip { padding: 5px 12px; border-radius: 999px; border: 1px solid #2a3444; background: transparent; color: #9fb0c3; cursor: pointer; }
+.chip.on { background: #2563EB; color: white; border-color: #2563EB; }
+.chip:disabled { opacity: 0.4; cursor: default; }
+.field { margin: 6px 0; }
+.field input, .field select { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #2a3444; background: #0d1117; color: #e6edf3; }
+.row-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(42,52,68,0.5); }
+.row-item:last-child { border-bottom: none; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.token-reveal { background: #10233d; border: 1px solid #2563EB; border-radius: 8px; padding: 10px; margin: 8px 0; word-break: break-all; }
+.token-reveal code { display: block; margin-top: 6px; font-size: 12px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin: 8px 0; }
+.badge.ok { color: #4ade80; }
+.link.danger { color: #f87171; }
+.screen { display: flex; flex-direction: column; gap: 14px; padding: 22px; }
+.screen-head { display: flex; align-items: center; justify-content: space-between; }
+.card { background: #111721; border: 1px solid #1f2937; border-radius: 12px; padding: 14px 16px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.muted { opacity: 0.6; font-size: 13px; }
+.error { color: #f87171; font-size: 13px; }
+button.primary { background: #2563EB; color: white; border: none; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+button.link { background: none; border: none; color: #60a5fa; cursor: pointer; padding: 0; font-size: 13px; }
+button.link:hover { text-decoration: underline; }
+select { padding: 6px; border-radius: 8px; border: 1px solid #2a3444; background: #0d1117; color: #e6edf3; }
+.login-card h2, .login-card label, .login-card .muted { color: #e6edf3; }
+.card h3, .card-head h3 { color: #e6edf3; }
+.screen-head h1 { color: #e6edf3; }
+.row-item, .card, .badge { color: #dbe4ee; }
+
+/* ── roadmap completion: notifications, privacy, connectors ── */
+.note { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(148, 163, 184, 0.12); }
+.note:last-child { border-bottom: none; }
+.note.unread strong { color: var(--accent, #60a5fa); }
+.note.read { opacity: 0.68; }
+.small { font-size: 12px; }
+.conn-status { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; border: 1px solid; }
+.conn-status.supported { color: #34d399; border-color: rgba(52, 211, 153, 0.45); }
+.conn-status.limited { color: #fbbf24; border-color: rgba(251, 191, 36, 0.45); }
+.conn-status.unavailable { color: #94a3b8; border-color: rgba(148, 163, 184, 0.4); }
+.conn-status.blocked { color: #f87171; border-color: rgba(248, 113, 113, 0.45); }
+.field label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
