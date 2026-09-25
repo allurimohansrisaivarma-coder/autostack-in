@@ -224,7 +224,7 @@ function getSuitability(item) {
 // Dashboard/Workflows/Registry/TrustLog are live modules (Phase 10).
 import { Dashboard, Workflows, Registry, TrustLog } from './screens-live.jsx';
 import { NotificationCenter, DataPrivacy, Connectors } from './roadmap-complete.jsx';
-import { api } from './api.js';
+import { api, setToken } from './api.js';
 import { Login, Home, Settings, Profile, Teams, Runners, Scheduling } from './roadmap-pages.jsx';
 
 function Discovery({ setPage }) {
@@ -389,24 +389,29 @@ function ThemeSwitcher() {
       ))}
     </div>
   );
-}
+}// ─── shell ────────────────────────────────────────────────────────────────────
+// Sidebar information architecture: MAIN (daily use) → OPERATE (workspace
+// tooling) → TRUST (governance) → ACCOUNT (user). Labels match the group
+// headers rendered in the nav; nothing was removed, only regrouped + ordered.
+const pages = [
+  { id:'dashboard',   label:'Dashboard',         icon: ICONS.grid,    group:'Main' },
+  { id:'discovery',   label:'Discovery',         icon: ICONS.zap,     group:'Main' },
+  { id:'create',      label:'Create Automation', icon: ICONS.plus,    group:'Main' },
+  { id:'workflows',   label:'Workflows',         icon: ICONS.flow,    group:'Main' },
+  { id:'notifications', label:'Notifications',  icon: ICONS.bell,    group:'Main' },
 
-// ─── shell ────────────────────────────────────────────────────────────────────
-const pages = [    { id:'home',      label:'Home',       icon: ICONS.grid, group:'Account' },
-    { id:'notifications', label:'Notifications', icon: ICONS.bell, group:'Work' },
-    { id:'privacy',   label:'Data & Privacy', icon: ICONS.shield, group:'Trust' },
-    { id:'connectors', label:'Connectors', icon: ICONS.package, group:'Operate' },
-  { id:'dashboard', label:'Dashboard',  icon: ICONS.grid, group:'Work' },
-  { id:'discovery', label:'Discovery',  icon: ICONS.zap,  group:'Work' },
-  { id:'create',    label:'Create Automation', icon: ICONS.plus, group:'Work' },
-  { id:'workflows', label:'Workflows',  icon: ICONS.flow, group:'Work' },
-  { id:'registry',  label:'Registry',   icon: ICONS.db,   group:'Trust' },
-  { id:'trustlog',  label:'Trust Log',  icon: ICONS.shield, group:'Trust' },
-  { id:'scheduling',label:'Scheduling', icon: ICONS.clock, group:'Operate' },
-  { id:'runners',   label:'Runners',    icon: ICONS.cpu,   group:'Operate' },
-  { id:'teams',     label:'Teams',      icon: ICONS.users, group:'Account' },
-  { id:'profile',   label:'Profile',    icon: ICONS.user,  group:'Account' },
-  { id:'settings',  label:'Settings',   icon: ICONS.cog,   group:'Account' },
+  { id:'scheduling',  label:'Scheduling',        icon: ICONS.clock,   group:'Operate' },
+  { id:'runners',     label:'Runners',           icon: ICONS.cpu,     group:'Operate' },
+  { id:'connectors',  label:'Connectors',        icon: ICONS.package, group:'Operate' },
+
+  { id:'registry',    label:'Registry',          icon: ICONS.db,      group:'Trust' },
+  { id:'trustlog',    label:'Trust Log',         icon: ICONS.shield,  group:'Trust' },
+  { id:'privacy',     label:'Data & Privacy',    icon: ICONS.shield,  group:'Trust' },
+
+  { id:'profile',     label:'Profile',           icon: ICONS.user,    group:'Account' },
+  { id:'teams',       label:'Teams',             icon: ICONS.users,   group:'Account' },
+  { id:'settings',    label:'Settings',          icon: ICONS.cog,     group:'Account' },
+  { id:'home',        label:'Home',              icon: ICONS.grid,    group:'Account' },
 ];
 
 function App() {
@@ -472,7 +477,7 @@ function App() {
         </div>
 
         <nav className="nav">
-          {['Work', 'Trust', 'Operate', 'Account'].map(group => (
+          {['Main', 'Operate', 'Trust', 'Account'].map(group => (
             <div key={group} className="nav-group">
               <div className="nav-group-label">{group}</div>
               {pages.filter(p => p.group === group).map(p => (
@@ -485,22 +490,37 @@ function App() {
                   <span>{p.label}</span>
                 </button>
               ))}
+              {group === 'Account' && <ThemeSwitcher />}
             </div>
           ))}
         </nav>
 
         <div className="sidebar-footer">
-          <ThemeSwitcher />
           <div className="consent-badge" title={workerUp ? 'Worker on :8747 — live data' : 'Worker unreachable — demo data shown'}>
             <Icon d={ICONS.lock} size={14} />
             <span>{workerUp ? 'Worker: LIVE' : 'Worker: demo mode'}</span>
           </div>
           <div className="sidebar-user">
             <div className="avatar">{identity && identity.user ? identity.user.username.slice(0, 2).toUpperCase() : 'SV'}</div>
-            <div>
+            <div className="sidebar-user-meta">
               <div className="user-name">{identity && identity.user ? identity.user.display_name || identity.user.username : 'Service token'}</div>
               <div className="user-role">{identity ? `${identity.capabilities.tier} · ${identity.role}` : 'legacy mode'}</div>
             </div>
+            {identity && identity.user && (
+              <button
+                className="signout-btn"
+                title="Sign out — clears this browser's session token"
+                aria-label="Sign out"
+                onClick={async () => {
+                  setToken('');
+                  setIdentity(null);
+                  setAuthState('anon');
+                  setPage('dashboard');
+                }}
+              >
+                <Icon d={ICONS.logout} size={16} />
+              </button>
+            )}
           </div>
         </div>
       </aside>

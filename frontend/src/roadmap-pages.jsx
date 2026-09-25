@@ -15,9 +15,12 @@ export function Login({ setPage, setIdentity }) {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   async function submit(e) {
     e.preventDefault();
+    if (busy) return; // double-submission guard
+    setBusy(true);
     setMsg(null);
     try {
       if (mode === 'signup') {
@@ -30,6 +33,8 @@ export function Login({ setPage, setIdentity }) {
       setPage('home');
     } catch (err) {
       setMsg(err.message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -50,8 +55,11 @@ export function Login({ setPage, setIdentity }) {
           <input type="password" value={password} onChange={e => setPassword(e.target.value)}
                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={8} />
         </label>
-        {msg && <div className="error">{msg}</div>}
-        <button className="primary" type="submit">{mode === 'login' ? 'Sign in' : 'Create account'}</button>
+        {msg && <div className="error" role="alert">{msg}</div>}
+        <button className="primary" type="submit" disabled={busy}>
+          {busy ? (mode === 'login' ? 'Signing in…' : 'Creating account…')
+                : (mode === 'login' ? 'Sign in' : 'Create account')}
+        </button>
         <button type="button" className="link" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
           {mode === 'login' ? 'Need an account? Create one' : 'Have an account? Sign in'}
         </button>

@@ -150,22 +150,24 @@ engine per test (module), so the dev DB row counts are identical before and afte
 ## Using the app
 
 The UI is a hash-routed shell (`#/dashboard` is the default) with a dark/light/system
-theme switch in the sidebar. Page groups map to the lifecycle:
+theme switch in the sidebar. Sidebar groups, in navigation order:
 
-- **Work** — `Dashboard` (live run/event/heartbeat status, honest "not measured" metrics),
-  `Discovery` (detected candidates from real repeated patterns), `Create Automation`
-  (plan → generate → sandbox test → approve stepper, backend-gated at each step),
-  `Workflows` (list, runs, parameter schemas, delete), `Notifications` (in-app feed with
-  read/read-all).
-- **Trust** — `Registry` (versioned template publish/import/withdraw with consent +
-  secret scan), `Trust Log` (hash-chained audit with chain verification and SIEM-style
-  export), `Data & Privacy` (processing ledger, retention windows in whole days,
-  subject export).
-- **Operate** — `Connectors` (honest per-integration status), `Scheduling` (per-workflow
-  triggers with enable/disable and a manual **tick**), `Runners` (pairing/confirm/revoke
-  lifecycle).
-- **Account** — `Home`, `Teams` (members, invitations, role changes), `Profile`
-  (`/auth/me`, API tokens with create/revoke), `Settings` (tier, theme).
+- **Main** (daily use) — `Dashboard` (live run/event/heartbeat status, honest "not
+  measured" metrics), `Discovery` (detected candidates from real repeated patterns),
+  `Create Automation` (plan → generate → sandbox test → approve stepper, backend-gated
+  at each step), `Workflows` (list, runs, parameter schemas, delete), `Notifications`
+  (in-app feed with read/read-all).
+- **Operate** (workspace tooling) — `Scheduling` (per-workflow triggers with
+  enable/disable and a manual **tick**), `Runners` (pairing/confirm/revoke lifecycle),
+  `Connectors` (honest per-integration status).
+- **Trust** (governance) — `Registry` (versioned template publish/import/withdraw with
+  consent + secret scan), `Trust Log` (hash-chained audit with chain verification and
+  SIEM-style export), `Data & Privacy` (processing ledger, retention windows in whole
+  days, subject export).
+- **Account** — `Profile` (`/auth/me`, API tokens with create/revoke), `Teams` (members,
+  invitations, role changes), `Settings` (tier + theme), `Home` (setup overview), and the
+  **sign-out** control in the sidebar's account block (clears the session token in this
+  browser).
 
 ### Roles
 

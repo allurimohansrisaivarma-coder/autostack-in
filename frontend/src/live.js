@@ -2,12 +2,7 @@
 // Rule: the worker owns real state; the UI falls back to demo data only when the
 // worker is unreachable. Never invents numbers — real candidates carry exact counts.
 
-import { api, setToken, getToken } from './api.js';
-
-const DEFAULT_TOKEN = 'spiketoken'; // spike default; keyring lands in Milestone A
-// Only default when no session exists — never clobber a restored per-user token
-// (that would 401 every screen after a reload with "invalid or revoked token").
-if (!getToken()) setToken(DEFAULT_TOKEN);
+import { api } from './api.js';
 
 const state = {
   listeners: new Set(),
