@@ -135,3 +135,30 @@ no fabricated values anywhere.
   the service principal, which keeps owner rights.
 - B3's loop is the largest new surface; it stays behind an enable flag per trigger
   (already exists) and reuses the run-now executor, so no new effect path is created.
+
+## QA round 6 — production-readiness pass (2026-09-25)
+
+Full re-inspection of the shipped tree with a dedicated hunt for defects the
+round-5 suites could not see. Findings, all fixed with armor tests in
+`tests/spike/test_hardening_round6.py`:
+
+| # | Defect | Root cause | Severity | Fix |
+|---|--------|-----------|----------|-----|
+| R6-1 | `teams.workflow_process_map` returned raw JSON strings | `_json` name existed only inside the sibling function; `except Exception` swallowed the NameError | medium | module-level `json` import; roundtrip armor test |
+| R6-2 | `/api/compare/run` never ran its promised oracle check | `expected_matches` computed then discarded; docstring lied | medium | fail-closed oracle gate (503 + audit on disagreement) |
+| R6-3 | `POST /api/triggers/tick` open to any authenticated principal | route used `require_principal` (authN only) | high | `require_writer`; observer 403 test |
+| R6-4 | Six org/capability GET routes served data with no token | dependencies missing (`/api/team/members` leaked the full roster) | high | `require_principal` on all six; negative + positive tests |
+| R6-5 | Caller-caused node data failures returned HTTP 500 | `_is_client_error` only knew `InvalidFixture`; `rows.py` raised bare `ValueError`s | medium | `ClientDataError` (ValueError subclass) raised at all five data-contract sites; run route maps chain to 400 |
+| R6-6 | Hot filter columns unindexed | schema had PKs/uniques only | low (spike scale) | 9 idempotent `CREATE INDEX IF NOT EXISTS` at startup, additive to model layer later |
+| R6-7 | Dev DB held 365 historical test-junk workflows | pre-isolation test rounds | low (demo honesty) | `scripts/cleanup_dev_junk.py` (dry-run default, soft-delete only, history kept); 368 → 3 real workflows |
+| R6-8 | Budgets script penalized cold-start poll | single first-call measurement | low | warmup call before timing |
+
+Behavioral battery (`scripts/scenario_battery.py`, 31 checks against the LIVE
+server): happy path + idempotent rerun, failure path (400 + failed run + failing
+node recorded), cancel semantics, invalid inputs, 6-way concurrent exactly-once,
+webhook auth/fire, schedule tick + once-per-day stamp, RBAC edges, audit chain
+`verify=1` — all passing; battery self-cleans its workflows.
+
+False alarms investigated and retracted: "Next button jumps to dashboard" (test
+harness DOM-shift artifact, stepper is correct), "fresh user can run workflows"
+(documented local-first design: registration joins the single org as operator).

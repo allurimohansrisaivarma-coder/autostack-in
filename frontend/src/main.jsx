@@ -367,6 +367,29 @@ function Discovery({ setPage }) {
 
 // CreateAutomation now lives in its own module (real backend-gated stepper).
 import { CreateAutomation } from './create-automation.jsx';
+import { getTheme, setTheme } from './theme.js';
+
+function ThemeSwitcher() {
+  const [theme, setThemeState] = useState(getTheme());
+  const options = [
+    { id: 'light', label: 'Light' },
+    { id: 'dark', label: 'Dark' },
+    { id: 'system', label: 'System' },
+  ];
+  return (
+    <div className="theme-switch" role="group" aria-label="Color theme">
+      {options.map(o => (
+        <button
+          key={o.id}
+          className={`theme-opt ${theme === o.id ? 'on' : ''}`}
+          aria-pressed={theme === o.id}
+          title={`${o.label} theme`}
+          onClick={() => { setTheme(o.id); setThemeState(o.id); }}
+        >{o.label}</button>
+      ))}
+    </div>
+  );
+}
 
 // ─── shell ────────────────────────────────────────────────────────────────────
 const pages = [    { id:'home',      label:'Home',       icon: ICONS.grid, group:'Account' },
@@ -467,6 +490,7 @@ function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <ThemeSwitcher />
           <div className="consent-badge" title={workerUp ? 'Worker on :8747 — live data' : 'Worker unreachable — demo data shown'}>
             <Icon d={ICONS.lock} size={14} />
             <span>{workerUp ? 'Worker: LIVE' : 'Worker: demo mode'}</span>

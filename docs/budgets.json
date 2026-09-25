@@ -1,5 +1,5 @@
 {
-  "measured_at": "2026-09-23T20:51:39.406944+00:00",
+  "measured_at": "2026-09-25T19:34:06.159678+00:00",
   "platform": "win32",
   "python": "3.13.14",
   "budgets": {
@@ -11,9 +11,9 @@
   "services": {
     "worker_up": true
   },
-  "capture_poll_ms": 21.6,
-  "idle_cpu_percent_of_core": 0.312,
-  "resident_memory_mib": 94.3,
+  "capture_poll_ms": 15.1,
+  "idle_cpu_percent_of_core": 0.467,
+  "resident_memory_mib": 98.5,
   "measured_window_seconds": 10.0,
   "within_budget": {
     "idle_cpu": true,

@@ -14,15 +14,12 @@ Plan rules implemented here:
 """
 from __future__ import annotations
 
-import csv
-import io
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.file_diff import compare, read_snapshot
-from backend import spike_config as cfg  # noqa: F401  (DATA_DIR used by callers)
 
 RED = "redacted"  # never log raw row content
 

@@ -12,6 +12,7 @@ demoted, so an org can never lose its administrators.
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -182,14 +183,13 @@ def list_processes(db: Session, org_id: str) -> list[Process]:
 
 def attach_workflow_to_process(db: Session, process_id: str, workflow_id: str) -> bool:
     """Workflows point at a process via Setting rows (keeps Workflow model untouched)."""
-    import json as _json
     from backend.models import Setting
     row = db.get(Setting, f"workflow_process:{workflow_id}")
     if row is None:
-        row = Setting(key=f"workflow_process:{workflow_id}", value_json=_json.dumps(process_id))
+        row = Setting(key=f"workflow_process:{workflow_id}", value_json=json.dumps(process_id))
         db.add(row)
     else:
-        row.value_json = _json.dumps(process_id)
+        row.value_json = json.dumps(process_id)
     db.commit()
     return True
 
@@ -201,7 +201,7 @@ def workflow_process_map(db: Session, workflow_ids: list[str]) -> dict[str, str]
         row = db.get(Setting, f"workflow_process:{wid}")
         if row is not None:
             try:
-                out[wid] = _json.loads(row.value_json)
+                out[wid] = json.loads(row.value_json)
             except Exception:
                 out[wid] = row.value_json
     return out

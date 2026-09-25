@@ -22,6 +22,12 @@ from backend.spike_config import RUN_DATE
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend.file_diff import read_snapshot  # noqa: E402  (reuse the Phase 1 proof as-is)
 
+
+class ClientDataError(ValueError):
+    """Caller-caused data/config contract violation (bad column, unknown template,
+    missing row). Subclasses ValueError so every existing handler keeps working;
+    the run route maps it to HTTP 400 instead of 500."""
+
 DRAFT_TEMPLATES = {
     "followup_en": "Hello {Name}, this is a sample follow-up reminder for {FollowUpDate}.",
     "followup_hi": "नमस्ते {Name}, यह {FollowUpDate} के लिए एक नमूना फॉलो-अप अनुस्मारक है।",
@@ -31,7 +37,7 @@ DRAFT_TEMPLATES = {
 def read_table(resource_alias: str, filename: str, max_rows: int = 1000) -> list[dict]:
     """Bounded read of the tracking table via the existing Phase 1 parser contract."""
     if max_rows > 1000:
-        raise ValueError("max_rows exceeds fixture budget (1000)")
+        raise ClientDataError("max_rows exceeds fixture budget (1000)")
     payload = safeio.read_resource(resource_alias, filename)
     rows = list(read_snapshot(_as_fixture_path(payload, filename)).values())
     return rows[:max_rows]
@@ -99,7 +105,7 @@ def _update_status_locked(db: Session, *, run_id: str, alias: str, filename: str
             updated = True
     if not updated:
         journal.mark_applied(db, effect)  # nothing changed; release claim to avoid stuck state
-        raise ValueError(f"row not found: {row['ClientID']}")
+        raise ClientDataError(f"row not found: {row['ClientID']}")
     out = io.StringIO()
     csv.writer(out).writerows([header, *body])
     result = safeio.write_resource(alias, filename, out.getvalue().encode("utf-8"), backup=True)
@@ -150,7 +156,7 @@ def create_draft(db: Session, *, run_id: str, record_key: str, row: dict, templa
             journal.mark_applied(db, effect)
             raise
     else:
-        raise ValueError(f"unknown template: {template_id}")
+        raise ClientDataError(f"unknown template: {template_id}")
     draft = Draft(id=str(uuid.uuid4()), run_id=run_id, record_key=record_key,
                   body=body, lang="hi" if template_id.endswith("_hi") else "en",
                   destination=destination)
@@ -185,7 +191,7 @@ def update_row_field(db: Session, *, run_id: str, alias: str, filename: str, key
             fi = header.index(field)
         except ValueError as exc:
             journal.mark_applied(db, effect)
-            raise ValueError(f"missing column: {exc}") from exc
+            raise ClientDataError(f"missing column: {exc}") from exc
         updated = False
         prior_value = None
         for r in body:
@@ -196,7 +202,7 @@ def update_row_field(db: Session, *, run_id: str, alias: str, filename: str, key
                 updated = True
         if not updated:
             journal.mark_applied(db, effect)
-            raise ValueError(f"row not found: {key_value}")
+            raise ClientDataError(f"row not found: {key_value}")
         out = io.StringIO()
         csv.writer(out).writerows([header, *body])
         result = safeio.write_resource(alias, filename, out.getvalue().encode("utf-8"), backup=True)

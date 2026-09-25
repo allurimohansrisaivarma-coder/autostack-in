@@ -20,11 +20,11 @@ from sqlalchemy.orm import Session
 
 from backend import entitlements, identity, orchestration, teams
 from backend.db import SessionLocal
-from backend.models import (Approval, AuditEntry, Draft, Event, Membership, Process,
-                            RegistryEvent, RegistryImport, Run, Setting, Trigger, User,
-                            Workflow, WorkflowVersion)
+from backend.models import (Approval, AuditEntry, Draft, Membership, Process,
+                            RegistryEvent, RegistryImport, Run, Setting, User,
+                            WorkflowVersion)
 from backend.security import audit as audit_mod
-from backend.security.tokens import get_expected_token
+from backend.security.tokens import get_expected_token, require_writer
 
 router = APIRouter(prefix="/api")
 
@@ -163,7 +163,7 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
 
 # ── Phase B: entitlements ────────────────────────────────────────────────────
 
-@router.get("/me/capabilities")
+@router.get("/me/capabilities", dependencies=[Depends(require_principal)])
 def me_capabilities(db: Session = Depends(get_db)):
     return entitlements.get_capabilities(db)
 
@@ -222,7 +222,7 @@ class AttachBody(BaseModel):
     workflow_id: str
 
 
-@router.get("/team/members")
+@router.get("/team/members", dependencies=[Depends(require_principal)])
 def team_members(db: Session = Depends(get_db)):
     org = teams.primary_org(db)
     return {"org": {"id": org.id, "name": org.name, "tier": org.tier},
@@ -271,7 +271,7 @@ def team_remove_member(membership_id: str, db: Session = Depends(get_db)):
     return {"removed": True}
 
 
-@router.get("/team/invitations")
+@router.get("/team/invitations", dependencies=[Depends(require_principal)])
 def team_list_invitations(db: Session = Depends(get_db)):
     org = teams.primary_org(db)
     return {"invitations": teams.list_invitations(db, org.id)}
@@ -311,7 +311,7 @@ def team_revoke_invitation(invitation_id: str, db: Session = Depends(get_db)):
     return {"revoked": True}
 
 
-@router.get("/processes")
+@router.get("/processes", dependencies=[Depends(require_principal)])
 def processes_list(db: Session = Depends(get_db)):
     org = teams.primary_org(db)
     return {"processes": [{"id": p.id, "name": p.name, "description": p.description,
@@ -354,7 +354,7 @@ class TriggerBody(BaseModel):
     evidence_note: str = ""
 
 
-@router.get("/runners")
+@router.get("/runners", dependencies=[Depends(require_principal)])
 def runners_list(db: Session = Depends(get_db)):
     return {"runners": [{"id": r.id, "name": r.name, "kind": r.kind, "status": r.status,
                          "last_seen_at": r.last_seen_at} for r in orchestration.list_runners(db)]}
@@ -463,7 +463,6 @@ def _start_triggered_run(db: Session, trig, trigger_kind: str, audit_extra: dict
     Reuses start_run's compiled-graph resolution so triggered runs execute for real
     (no status='running' zombies) and share the exactly-once journal.
     """
-    import uuid
     from fastapi import HTTPException as _HTTPException
     version = (db.query(WorkflowVersion)
                .filter(WorkflowVersion.workflow_id == trig.workflow_id)
@@ -637,7 +636,8 @@ def registry_review(template_id: str, body: ReviewBody, db: Session = Depends(ge
     return {"template_id": template_id, "status": t.status}
 
 
-@router.get("/registry/templates/{template_id}/signals")
+@router.get("/registry/templates/{template_id}/signals",
+             dependencies=[Depends(require_principal)])
 def registry_signals(template_id: str, db: Session = Depends(get_db)):
     """Honest signals only: real install events and real imported-run reports."""
     installs = db.query(RegistryEvent).filter(RegistryEvent.template_id == template_id,
@@ -926,7 +926,6 @@ def trigger_tick(db: Session) -> dict:
 
 def trigger_loop_worker():
     """Daemon loop (worker process only): bounded tick every 30 s, never crashes."""
-    import threading
     import time as _time
 
     from backend.db import SessionLocal as _SL
@@ -956,9 +955,12 @@ def start_trigger_loop_if_needed():
 _LOOP_STATE = {"started": False, "thread": None}
 
 
-@router.post("/triggers/tick", dependencies=[Depends(require_principal)])
+@router.post("/triggers/tick", dependencies=[Depends(require_writer)])
 def triggers_tick(db: Session = Depends(get_db)):
-    """Manual tick (tests + ops); the background loop runs the same function."""
+    """Manual tick (tests + ops); the background loop runs the same function.
+
+    Requires an operator-role principal (or the service token): a manual tick can
+    fire real workflow runs, so read-only observers are rejected (QA round 6)."""
     with _trigger_lock():
         return trigger_tick(db)
 

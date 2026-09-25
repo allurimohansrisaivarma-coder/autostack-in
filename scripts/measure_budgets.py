@@ -92,7 +92,10 @@ def measure(window_seconds: int = 10) -> dict:
     t0_stats = {p: _proc_stats(p) for p in all_pids}
     t0 = time.perf_counter()
 
-    # Capture-poll cost (a real poll over the sample folder).
+    # Capture-poll cost (a real poll over the sample folder). A warmup call first:
+    # the first poll after worker start pays one-time directory/WAL warm-up, which
+    # is not representative of steady state.
+    _http(f"{WORKER_URL}/api/capture/poll", method="POST", token=WORKER_TOKEN, body=None)
     t1 = time.perf_counter()
     _http(f"{WORKER_URL}/api/capture/poll", method="POST", token=WORKER_TOKEN, body=None)
     poll_ms = (time.perf_counter() - t1) * 1000

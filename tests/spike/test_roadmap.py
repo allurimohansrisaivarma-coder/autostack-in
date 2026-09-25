@@ -83,7 +83,7 @@ def test_token_revocation(client):
 def test_default_tier_solo_and_capability_gating(client):
     # pin the baseline tier first (the dev DB persists across runs)
     assert _post(client, "/api/org/tier", {"tier": "solo"}).status_code == 200
-    caps = client.get("/api/me/capabilities").json()
+    caps = client.get("/api/me/capabilities", headers=SERVICE).json()
     assert caps["tier"] == "solo"
     # paired runner forbidden on solo with actionable unlock hint
     r = _post(client, "/api/runners", {"name": "officemachine", "kind": "paired"})
@@ -125,7 +125,7 @@ def test_member_roles_invitations_last_owner_protection(client):
     a = _mkuser(client, f"own-{uuid.uuid4().hex[:6]}")
     b = _mkuser(client, f"opr-{uuid.uuid4().hex[:6]}")
     # members exist with roles from the role set
-    members = client.get("/api/team/members").json()["members"]
+    members = client.get("/api/team/members", headers=SERVICE).json()["members"]
     assert all(m["role"] in ("observer", "operator", "approver", "owner") for m in members)
     # invitation lifecycle
     inv = _post(client, "/api/team/invitations", {"role": "approver"}).json()
@@ -138,7 +138,7 @@ def test_member_roles_invitations_last_owner_protection(client):
                     headers={"Authorization": f"Bearer {b}"})
     assert r.status_code == 400
     # last-owner demotion blocked
-    owners = [m for m in client.get("/api/team/members").json()["members"] if m["role"] == "owner"]
+    owners = [m for m in client.get("/api/team/members", headers=SERVICE).json()["members"] if m["role"] == "owner"]
     r = client.post(f"/api/team/members/{owners[0]['membership_id']}/role",
                     json={"role": "operator"}, headers=SERVICE)
     assert r.status_code == 409
@@ -152,7 +152,7 @@ def test_processes_and_attachment(client):
     pid = p.json()["process_id"]
     r = _post(client, f"/api/processes/{pid}/attach", {"workflow_id": "wf_any"})
     assert r.status_code == 200
-    listed = client.get("/api/processes").json()["processes"]
+    listed = client.get("/api/processes", headers=SERVICE).json()["processes"]
     assert any(x["id"] == pid for x in listed)
 
 
@@ -385,7 +385,7 @@ def test_registry_signals_honest_counts(client):
                                                       "title": "Signal test", "graph": {"nodes": [], "edges": []}})
     assert pub.status_code in (200, 422)  # 422 if validation requires more fields
     # signals endpoint exists and reports honest zeros for unknown template
-    r = client.get("/api/registry/templates/does-not-exist/signals")
+    r = client.get("/api/registry/templates/does-not-exist/signals", headers=SERVICE)
     assert r.status_code == 200 or r.status_code == 404
 
 

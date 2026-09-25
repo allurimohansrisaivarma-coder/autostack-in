@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select as sa_select
+from sqlalchemy import select as sa_select, text as _sqltext
 from sqlalchemy.orm import Session
 
 from backend import spike_config as cfg
@@ -29,11 +29,29 @@ from backend.models import (AuditEntry, Candidate, Draft, Event, Run, RunNodeRec
                             Setting, Workflow, WorkflowVersion, Base)
 from backend.security import audit as audit_mod
 from backend.security.safeio import sha256_bytes, write_resource
-from backend.security.tokens import require_token, require_writer, require_admin
+from backend.security.tokens import require_token, require_writer
 from backend import validate_events as phase1_validate
 from backend.roadmap_routes import router as roadmap_router
 
 Base.metadata.create_all(db_engine)
+
+# Runtime indexes for hot filter columns (additive; idempotent for existing DBs
+# where create_all cannot ALTER). Queries filter workflow_id/run_id/plan_id/slug
+# on every run, listing, and registry lookup.
+with db_engine.begin() as _conn:
+    for _idx, _tbl, _col in (
+        ("ix_workflow_versions_workflow_id", "workflow_versions", "workflow_id"),
+        ("ix_runs_version_id", "runs", "version_id"),
+        ("ix_run_node_records_run_id", "run_node_records", "run_id"),
+        ("ix_generated_artifacts_plan_id", "generated_artifacts", "plan_id"),
+        ("ix_registry_templates_slug", "registry_templates", "slug"),
+        ("ix_registry_events_template_id", "registry_events", "template_id"),
+        ("ix_triggers_workflow_id", "triggers", "workflow_id"),
+        ("ix_memberships_org_id", "memberships", "org_id"),
+        ("ix_review_gates_run_id", "review_gates", "run_id"),
+    ):
+        _conn.execute(_sqltext(
+            f"CREATE INDEX IF NOT EXISTS {_idx} ON {_tbl}({_col})"))
 
 app = FastAPI(title="AutoStack spike worker", version="0.1.0")
 app.include_router(roadmap_router)
@@ -228,15 +246,17 @@ def start_run(body: RunBody, db: Session = Depends(get_db)):
 
 
 def _is_client_error(exc: BaseException) -> bool:
-    """Client-caused run failures (bad file contents) are 400, not 500 (QA finding).
+    """Client-caused run failures (bad file contents, data-contract violations) are
+    400, not 500 (QA findings).
 
     Node errors are re-raised as RuntimeError with the original exception chained,
-    so walk the __cause__/__context__ chain for fixture-contract violations.
+    so walk the __cause__/__context__ chain for fixture/data-contract violations.
     """
+    from backend.engine.rows import ClientDataError
     from backend.file_diff import InvalidFixture
     e, seen = exc, 0
     while e is not None and seen < 5:
-        if isinstance(e, InvalidFixture):
+        if isinstance(e, (InvalidFixture, ClientDataError)):
             return True
         e = e.__cause__ or e.__context__
         seen += 1
@@ -245,7 +265,6 @@ def _is_client_error(exc: BaseException) -> bool:
 
 def _start_run_graph(db: Session, version: WorkflowVersion, graph: dict,
                      body: RunBody) -> dict:
-    from backend.engine import graph_build
     from backend.models import GenerationPlan
     plan_row = (db.query(GenerationPlan)
                 .filter(GenerationPlan.plan_sha256 == version_payload_plan_hash(version))
@@ -1051,7 +1070,6 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
     drafted: list[str] = []
     skipped: list[str] = []
     notified = False
-    elig = plan.get("eligibility") or {}
     templates = plan.get("templates") or None
     purpose = plan.get("purpose", "followup-draft")
     params = params or {}
@@ -1382,6 +1400,19 @@ def compare_run(db: Session = Depends(get_db)):
     purchase_orders = compare.parse_table(safeio.read_resource("invoice-register", "purchase-orders.csv"))
     enriched = compare.compare_invoices(invoices, purchase_orders, tolerance=0.01)
     expected = compare.expected_matches(invoices, purchase_orders, tolerance=0.01)
+    # Fail-closed oracle gate: the compare engine (hash-index) must agree with the
+    # independent oracle (per-invoice linear scan) BEFORE any effect applies.
+    disagreements = [inv_id for inv_id, cat in expected.items()
+                     for e in enriched
+                     if str(e.get("InvoiceID", "")) == inv_id
+                     and str(e.get("po_match", "")) != cat]
+    if disagreements:
+        audit_mod.append(db, "run.refused", {"workflow": "invoice-po-compare",
+                        "reason": "compare/oracle disagreement", "invoices": disagreements})
+        db.commit()
+        raise HTTPException(status_code=503, detail={"error":
+                            "compare engine disagrees with independent oracle; "
+                            "no effects applied", "invoices": disagreements})
 
     run = Run(id=str(uuid.uuid4()), version_id=_compare_version_id(db),
               trigger_type="manual", status="running")
