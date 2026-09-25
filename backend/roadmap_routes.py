@@ -185,7 +185,7 @@ def org_set_tier(body: TierBody, db: Session = Depends(get_db)):
     return caps
 
 
-@router.get("/org/sso")
+@router.get("/org/sso", dependencies=[Depends(require_principal)])
 def org_sso(db: Session = Depends(get_db)):
     caps = entitlements.get_capabilities(db)
     return {"enabled": bool(caps.get("sso")), "provider": None if not caps.get("sso") else "configured-external",
@@ -672,7 +672,8 @@ class MarkReadBody(BaseModel):
 
 @router.post("/notifications/read-all", dependencies=[Depends(require_principal)])
 def notifications_mark_all(body: MarkReadBody, db: Session = Depends(get_db)):
-    """Mark all unread notifications read, or an explicit id list (owner+ only)."""
+    """Mark all unread notifications read, or an explicit id list. Notifications
+    are org-global (no per-user rows), so any authenticated member may mark them."""
     from backend.models import Notification
     q = db.query(Notification).filter(Notification.read_at.is_(None))
     if body.ids:

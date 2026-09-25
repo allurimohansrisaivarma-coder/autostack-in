@@ -10,12 +10,8 @@ import sys
 import uuid
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-
-from fastapi.testclient import TestClient  # noqa: E402  (re-exported for readers)
 
 SERVICE = {"Authorization": "Bearer spiketoken", "Content-Type": "application/json"}
 
@@ -100,10 +96,10 @@ def test_tier_upgrade_unlocks_capabilities(client):
     assert r.status_code == 200 and r.json()["tier"] == "team"
     r = _post(client, "/api/runners", {"name": "officemachine", "kind": "paired"})
     assert r.status_code == 200 and r.json()["kind"] == "paired"
-    # sso endpoint reflects entitlement
-    assert client.get("/api/org/sso").json()["enabled"] is False
+    # sso endpoint reflects entitlement (token required since QA round 7)
+    assert client.get("/api/org/sso", headers=SERVICE).json()["enabled"] is False
     _post(client, "/api/org/tier", {"tier": "enterprise"})
-    assert client.get("/api/org/sso").json()["enabled"] is True
+    assert client.get("/api/org/sso", headers=SERVICE).json()["enabled"] is True
 
 
 def test_government_tier_is_local_only(client):
@@ -122,7 +118,7 @@ def test_unknown_tier_rejected(client):
 
 def test_member_roles_invitations_last_owner_protection(client):
     _post(client, "/api/org/tier", {"tier": "team"})
-    a = _mkuser(client, f"own-{uuid.uuid4().hex[:6]}")
+    _mkuser(client, f"own-{uuid.uuid4().hex[:6]}")
     b = _mkuser(client, f"opr-{uuid.uuid4().hex[:6]}")
     # members exist with roles from the role set
     members = client.get("/api/team/members", headers=SERVICE).json()["members"]

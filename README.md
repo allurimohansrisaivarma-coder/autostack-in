@@ -113,7 +113,7 @@ workflow.
 TOK=$(cat artifacts/spike/token)
 AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/qa_probe.py          # 57 checks
 AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/scenario_battery.py  # 31 checks
-.venv/Scripts/python.exe -m pytest tests/ -q                                 # 127 tests + 29 subtests
+.venv/Scripts/python.exe -m pytest tests/ -q                                 # 132 tests + 29 subtests
 ```
 
 ## Environment variables
@@ -139,6 +139,7 @@ The AI key is read at request time and is never written to the database or logs.
 | `.venv/Scripts/python.exe -m pytest tests/ -q`       | Full test suite (isolated throwaway DBs)       |
 | `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/qa_probe.py` | 57-check live-stack probe          |
 | `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/scenario_battery.py` | 31-check live behavioral battery (failure paths, concurrency, triggers, RBAC; self-cleaning) |
+| `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/authz_matrix.py` | 147-check live authorization matrix: one real account per role drives every protected endpoint; escalation/IDOR/token-lifecycle checks |
 | `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/cleanup_dev_junk.py [--apply]` | Soft-delete historical test-junk workflows (dry-run by default) |
 | `.venv/Scripts/python.exe scripts/measure_budgets.py`| Performance budget measurements                |
 
@@ -172,12 +173,19 @@ theme switch in the sidebar. Sidebar groups, in navigation order:
 ### Roles
 
 Four org roles gate every mutating route: **observer** (read-only) < **operator** (run /
-stage / create workflows) < **approver** (test / activate / publish) < **owner** (admin:
-tier, members, delete, triggers). Service tokens (the worker token) pass at owner level;
-user tokens are resolved through team membership. First registered local user becomes
-owner; subsequent registrations join as operator (local-first self-serve design).
-Concretely: an observer gets `403` on `POST /api/workflows`, `/api/runs`, or
-`/api/triggers/tick`; only an owner can `DELETE /api/workflows/{id}` or change the org tier.
+stage / create workflows / drive bridge callbacks) < **approver** (sandbox-test /
+activate automations) < **owner** (publish to registry, admin: tier, members, triggers,
+delete workflows). Service tokens (the worker token) pass at owner level; user tokens
+are resolved through team membership. First registered local user becomes owner;
+subsequent registrations join as operator (local-first self-serve design).
+
+Enforcement is server-side on every route (verified endpoint-by-endpoint with real
+role accounts — `scripts/authz_matrix.py`): observers get `403` on all writes
+including node callbacks and the trigger tick; operators cannot test/activate or
+publish; approvers cannot publish or administer; only an owner can
+`DELETE /api/workflows/{id}` or change the org tier. A soft-deleted workflow id can
+never be reused (no silent resurrection). Token lifecycle: user tokens are issued
+per-user, scoped to that user for revocation, and die immediately on revoke.
 
 ### Running a workflow three ways
 
@@ -248,7 +256,7 @@ Focus-visible outlines, disabled states, and native form controls adapt per them
 
 | Suite | What it proves | Status |
 |-------|----------------|--------|
-| `pytest tests/` (127 tests + 29 subtests) | Full backend behavior on isolated throwaway DBs: lifecycle, RBAC, sandbox, triggers, registry, privacy, retention, hardening armor | **Passing** |
+| `pytest tests/` (132 tests + 29 subtests) | Full backend behavior on isolated throwaway DBs: lifecycle, RBAC, sandbox, triggers, registry, privacy, retention, hardening armor | **Passing** |
 | `scripts/qa_probe.py` (57 checks) | The live stack end-to-end: worker + Node-RED + all feature surfaces | **Passing** |
 | `scripts/scenario_battery.py` (31 checks) | Behavioral battery against the *running* server: happy path, idempotent rerun, failure path (HTTP 400 + `failed` run + failing node recorded), cancel semantics, invalid inputs, 6-way concurrent exactly-once, webhook auth/fire, schedule tick + once-per-day, RBAC edges, audit `verify=1`; self-cleaning | **Passing** |
 | `scripts/measure_budgets.py` | Idle CPU, resident memory, capture-poll latency vs budgets in `docs/budgets.json` | **Within budget** |
@@ -342,7 +350,7 @@ backend/           FastAPI worker (app.py, roadmap_routes.py, engine/, security/
 frontend/          React 19 + Vite UI (src/main.jsx shell, theme.js, page modules, tokens in styles.css)
 desktop/           Node-RED embed (red-embed.js, red-embed-core.js) + Electron shell (main.js)
 scripts/           run_worker.py, qa_probe.py (57), scenario_battery.py (31), cleanup_dev_junk.py, measure_budgets.py
-tests/spike/       127 pytest tests + 29 subtests; isolated-DB conftest
+tests/spike/       132 pytest tests + 29 subtests; isolated-DB conftest
 docs/              contracts, phase-1 plan/status, spike evidence, platform matrix, roadmap, QA report, budgets
 artifacts/spike/   runtime state: spike.db, token, red-userdir, logs (gitignored)
 ```

@@ -29,7 +29,7 @@ from backend.models import (AuditEntry, Candidate, Draft, Event, Run, RunNodeRec
                             Setting, Workflow, WorkflowVersion, Base)
 from backend.security import audit as audit_mod
 from backend.security.safeio import sha256_bytes, write_resource
-from backend.security.tokens import require_token, require_writer
+from backend.security.tokens import require_token, require_writer, require_tester, require_publisher
 from backend import validate_events as phase1_validate
 from backend.roadmap_routes import router as roadmap_router
 
@@ -167,6 +167,12 @@ def save_workflow(body: WorkflowBody, db: Session = Depends(get_db)):
     canonical = json.dumps(body.graph, sort_keys=True, separators=(",", ":"))
     artifact = hashlib.sha256(canonical.encode()).hexdigest()
     wf = db.get(Workflow, body.id)
+    if wf is not None and wf.deleted_at is not None:
+        # QA round 7: saving into a soft-deleted id must NOT silently resurrect it
+        # (that would bypass the owner-only delete gate). Recreating requires a new id.
+        raise HTTPException(status_code=409, detail={
+            "error": "workflow id belongs to a deleted workflow; history is retained",
+            "how_to_unlock": "choose a different workflow id"})
     if wf is None:
         wf = Workflow(id=body.id, name=body.name)
         db.add(wf)
@@ -475,7 +481,7 @@ class NodeCallback(BaseModel):
     error: str | None = None
 
 
-@app.post("/api/nodes/read-due", dependencies=[Depends(require_token)])
+@app.post("/api/nodes/read-due", dependencies=[Depends(require_writer)])
 def node_read_due(cb: NodeCallback, db: Session = Depends(get_db)):
     table = rows.read_table("sample-tracking-file", cb.filename)
     due = rows.filter_due(table, cfg.RUN_DATE)
@@ -486,7 +492,7 @@ def node_read_due(cb: NodeCallback, db: Session = Depends(get_db)):
     return {"due": due}
 
 
-@app.post("/api/nodes/update-row", dependencies=[Depends(require_token)])
+@app.post("/api/nodes/update-row", dependencies=[Depends(require_writer)])
 def node_update_row(cb: NodeCallback, db: Session = Depends(get_db)):
     row = {"ClientID": (cb.record_key or "").removeprefix("sample:")}
     if not row["ClientID"]:
@@ -501,7 +507,7 @@ def node_update_row(cb: NodeCallback, db: Session = Depends(get_db)):
     return result
 
 
-@app.post("/api/nodes/draft-create", dependencies=[Depends(require_token)])
+@app.post("/api/nodes/draft-create", dependencies=[Depends(require_writer)])
 def node_draft_create(cb: NodeCallback, db: Session = Depends(get_db)):
     if not cb.record_key:
         raise HTTPException(status_code=400, detail={"error": "record_key required"})
@@ -517,7 +523,7 @@ def node_draft_create(cb: NodeCallback, db: Session = Depends(get_db)):
     return result
 
 
-@app.post("/api/nodes/notify", dependencies=[Depends(require_token)])
+@app.post("/api/nodes/notify", dependencies=[Depends(require_writer)])
 def node_notify(cb: NodeCallback, db: Session = Depends(get_db)):
     audit_mod.append(db, "notify.desktop", {"title": cb.title, "redacted": True})
     db.commit()
@@ -527,7 +533,7 @@ def node_notify(cb: NodeCallback, db: Session = Depends(get_db)):
     return {"notified": True}
 
 
-@app.post("/api/runs/{run_id}/complete", dependencies=[Depends(require_token)])
+@app.post("/api/runs/{run_id}/complete", dependencies=[Depends(require_writer)])
 def bridge_complete(run_id: str, cb: NodeCallback, db: Session = Depends(get_db)):
     run = db.get(Run, run_id)
     if run is None:
@@ -769,7 +775,7 @@ class TestJobBody(BaseModel):
     consent: bool
 
 
-@app.post("/api/test-jobs", dependencies=[Depends(require_writer)])
+@app.post("/api/test-jobs", dependencies=[Depends(require_tester)])
 def create_test_job(body: TestJobBody, db: Session = Depends(get_db)):
     from backend.engine import runner
     from backend.models import GeneratedArtifact, TestJob
@@ -864,7 +870,7 @@ class ApprovalBody(BaseModel):
     note: str = ""
 
 
-@app.post("/api/approvals/activation", dependencies=[Depends(require_writer)])
+@app.post("/api/approvals/activation", dependencies=[Depends(require_tester)])
 def activation_approval(body: ApprovalBody, db: Session = Depends(get_db)):
     """Separate human decision AFTER tests pass. Rejects stale/mismatched evidence."""
     from backend.models import Approval, GeneratedArtifact, TestJob
@@ -911,7 +917,7 @@ def _graph_secret_scan(graph: dict) -> list[str]:
     return violations
 
 
-@app.post("/api/registry/publish", dependencies=[Depends(require_writer)])
+@app.post("/api/registry/publish", dependencies=[Depends(require_publisher)])
 def registry_publish(body: PublishBody, db: Session = Depends(get_db)):
     from backend.models import RegistryTemplate
     if not body.publication_consent:

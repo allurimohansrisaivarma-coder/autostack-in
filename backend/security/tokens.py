@@ -74,6 +74,10 @@ def require_writer(request: Request) -> None:
 def require_admin(request: Request) -> None:
     """B1: administrative legacy routes (tier/org changes) require owner role or
     the service principal. Mirrors admin_guard on the roadmap routes."""
+    _require_permission(request, "admin")
+
+
+def _require_permission(request: Request, permission: str) -> None:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail={"error": "missing bearer token"})
@@ -88,7 +92,20 @@ def require_admin(request: Request) -> None:
     from backend.db import SessionLocal
     with SessionLocal() as db:
         role = teams.user_role(db, user)
-    if not teams.role_allows(role, "admin"):
+    if not teams.role_allows(role, permission):
+        need = teams.PERMISSION_MIN_ROLE.get(permission, "owner")
         raise HTTPException(status_code=403, detail={
-            "error": f"role '{role}' may not perform administrative actions",
-            "how_to_unlock": "owner role"})
+            "error": f"role '{role}' may not perform this action",
+            "how_to_unlock": f"{need} role"})
+
+
+def require_tester(request: Request) -> None:
+    """QA round 7: sandbox-test/activation routes need approver+ (the legacy
+    lifecycle routes previously accepted operator, contradicting the product's
+    own PERMISSION_MIN_ROLE: test/activate = approver)."""
+    _require_permission(request, "test")
+
+
+def require_publisher(request: Request) -> None:
+    """QA round 7: registry publication needs owner+ (publish = owner)."""
+    _require_permission(request, "publish")

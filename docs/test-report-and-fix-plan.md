@@ -162,3 +162,26 @@ webhook auth/fire, schedule tick + once-per-day stamp, RBAC edges, audit chain
 False alarms investigated and retracted: "Next button jumps to dashboard" (test
 harness DOM-shift artifact, stepper is correct), "fresh user can run workflows"
 (documented local-first design: registration joins the single org as operator).
+
+## QA round 7 — authorization audit (2026-09-25)
+
+Full authorization sweep: all 85 routes mapped to their guards, one real account
+per role (observer/operator/approver/owner) created against the LIVE server, and
+every protected endpoint exercised with each role via
+`scripts/authz_matrix.py` (147 checks, all passing after fixes).
+
+| # | Defect | Root cause | Severity | Fix |
+|---|--------|-----------|----------|-----|
+| R7-1 | Operator could test/activate automations via legacy routes (`/api/test-jobs`, `/api/approvals/activation`) | routes used `require_writer`; product model says test/activate = approver | high | `require_tester` (new guard, `test` permission = approver) |
+| R7-2 | Approver could publish to the registry via the legacy route | same tier mismatch (publish = owner) | high | `require_publisher` (new guard, `publish` permission = owner) |
+| R7-3 | Node-callback effect routes accepted any authenticated user (`require_token`) — an observer could drive row updates/drafts/run-completion directly | bridge callbacks and user tokens shared one guard | high | `require_writer` on `/api/nodes/*` and `/api/runs/{id}/complete`; Node-RED bridge (service token) unaffected |
+| R7-4 | Saving a workflow into a soft-deleted id returned 200 but silently did nothing | `save_workflow` didn't check `deleted_at`; also let non-owners bypass the owner-only delete gate by id reuse | medium | 409 with `how_to_unlock` hint; regression test |
+| R7-5 | `/api/org/sso` served tier capability info without a token | missing dependency | low | `require_principal` |
+| R7-6 | `notifications/read-all` docstring claimed "owner+ only" but the notifications model is org-global | stale docstring | low | docstring corrected to actual behavior |
+
+Escalation/IDOR/lifecycle checks (all passing live): observer/operator cannot
+self-elevate or add members; register ignores injected `is_admin`/`role` fields;
+forged users land as operator; cross-user token revocation is 404 (ownership
+enforced in `identity.revoke_token`); revoked tokens die immediately; tampered
+and garbage tokens 401; anonymous requests 401 on every sensitive route;
+workflow delete remains owner-only (delete is a one-way gate).

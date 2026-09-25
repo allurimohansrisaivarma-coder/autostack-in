@@ -138,3 +138,73 @@ def test_node_data_error_is_400_not_500(client, isolated_db):
     with _ts() as db:
         run = db.get(Run, body["run_id"])
         assert run is not None and run.status == "failed" and run.error
+
+
+# ── QA round 7: lifecycle-route permission tiers + delete semantics ──
+
+def test_approver_level_routes_reject_operator(client, isolated_db):
+    """test/activate = approver in PERMISSION_MIN_ROLE; the legacy lifecycle
+    routes used to accept operator (RBAC tier bypass via the legacy path)."""
+    op = _mk_user_token(client, f"tier-op-{uuid.uuid4().hex[:4]}", role="operator")
+    assert client.post("/api/test-jobs", json={"artifact_id": "x", "consent": True},
+                       headers={"Authorization": f"Bearer {op}"}).status_code == 403
+    assert client.post("/api/approvals/activation", json={"artifact_id": "x", "job_id": "y"},
+                       headers={"Authorization": f"Bearer {op}"}).status_code == 403
+    # service principal and approver keep non-403 contract behavior
+    assert client.post("/api/test-jobs", json={"artifact_id": "x", "consent": True},
+                       headers=SERVICE).status_code == 404
+
+
+def test_publish_requires_owner(client, isolated_db):
+    """publish = owner; the legacy /api/registry/publish used to accept approver."""
+    apr = _mk_user_token(client, f"pub-apr-{uuid.uuid4().hex[:4]}", role="approver")
+    H = {"Authorization": f"Bearer {apr}", "Content-Type": "application/json"}
+    r = client.post("/api/registry/publish",
+                    json={"slug": f"pub-{uuid.uuid4().hex[:6]}", "title": "t",
+                          "publication_consent": True, "graph": {"nodes": [], "edges": []}},
+                    headers=H)
+    assert r.status_code == 403, r.text
+    # owner-equivalent service principal still publishes (probe depends on this)
+    r2 = client.post("/api/registry/publish",
+                     json={"slug": f"pub-svc-{uuid.uuid4().hex[:6]}", "title": "t",
+                           "publication_consent": True, "graph": {"nodes": [], "edges": []}},
+                     headers=SERVICE)
+    assert r2.status_code in (200, 422), r2.text
+
+
+def test_node_callback_routes_reject_observer(client, isolated_db):
+    """Node callbacks execute real effects (row updates, drafts); an observer's
+    user token must not drive them. The Node-RED bridge uses the service token."""
+    obs = _mk_user_token(client, f"node-obs-{uuid.uuid4().hex[:4]}", role="observer")
+    H = {"Authorization": f"Bearer {obs}", "Content-Type": "application/json"}
+    for path, body in (
+        ("/api/nodes/update-row", {"run_id": "r", "node_id": "n", "record_key": "k"}),
+        ("/api/nodes/draft-create", {"run_id": "r", "node_id": "n", "record_key": "k",
+                                     "template_id": "followup_en"}),
+        ("/api/runs/nonexistent/complete", {"status": "passed"}),
+    ):
+        assert client.post(path, json=body, headers=H).status_code == 403, path
+
+
+def test_soft_deleted_workflow_id_cannot_be_reused(client, isolated_db):
+    """Saving into a soft-deleted workflow id returned 200 but left the workflow
+    deleted — a silent no-op that also bypassed the owner-only delete gate."""
+    wid = f"wf-del-{uuid.uuid4().hex[:6]}"
+    assert client.post("/api/workflows", json={"id": wid, "name": "x",
+                                               "graph": {"nodes": [], "edges": []}},
+                       headers=SERVICE).status_code == 200
+    assert client.delete(f"/api/workflows/{wid}", headers=SERVICE).status_code == 200
+    r = client.post("/api/workflows", json={"id": wid, "name": "resurrect",
+                                            "graph": {"nodes": [], "edges": []}},
+                    headers=SERVICE)
+    assert r.status_code == 409, r.text
+    from tests.spike.conftest import test_session as _ts
+    from backend.models import Workflow
+    with _ts() as db:
+        assert db.get(Workflow, wid).deleted_at is not None
+
+
+def test_org_sso_requires_token(client, isolated_db):
+    """Tier capability info (sso flag) was served anonymously."""
+    assert client.get("/api/org/sso").status_code == 401
+    assert client.get("/api/org/sso", headers=SERVICE).status_code == 200

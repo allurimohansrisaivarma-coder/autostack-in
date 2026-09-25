@@ -91,7 +91,6 @@ def scenario_happy_and_repeat():
         if r.get("status") in ("passed", "failed"):
             break
         time.sleep(0.5)
-    drafted2 = (r.get("summary") or {}).get("drafted") if isinstance(r.get("summary"), dict) else None
     check("repeat run: exactly-once holds (no duplicate drafts)", r.get("status") in ("passed", "failed"),
           f"run2={r.get('status')}")
     return wid
