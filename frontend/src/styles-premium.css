@@ -316,38 +316,12 @@ html[data-fx="dark"] .btn-hero, [data-theme="dark"] .btn-hero { color: #0b1220; 
 .auth-points .ap svg { color: var(--ok); flex-shrink: 0; }
 
 /* ─── App shell upgrades ────────────────────────────────────────────────────── */
-.sidebar {
-  background: color-mix(in srgb, var(--panel) 76%, transparent);
-  -webkit-backdrop-filter: blur(20px) saturate(1.5);
-  backdrop-filter: blur(20px) saturate(1.5);
-  border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-}
-.brand { gap: 10px; }
-.brand-name { font-weight: 700; letter-spacing: -0.01em; }
-.nav-item {
-  border-radius: 9px; position: relative;
-  transition: background 0.22s ease, color 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.nav-item:hover { transform: translateX(1px); }
-.nav-item.active {
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--accent-strong);
-}
-[data-theme="dark"] .nav-item.active { color: var(--accent-strong); }
-.nav-item.active::before { display: none; }
-.nav-item.active::after {
-  content: ''; position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: var(--accent);
-}
 .theme-switch {
   border: 1px solid var(--border); background: color-mix(in srgb, var(--card) 60%, transparent);
   border-radius: 999px; padding: 3px; gap: 2px;
 }
 .theme-opt { border-radius: 999px; font-size: 11px; padding: 4px 10px; transition: all 0.25s ease; }
 .theme-opt.on { background: var(--accent); color: #fff; box-shadow: 0 1px 4px color-mix(in srgb, var(--accent) 40%, transparent); }
-.signout-btn { border-radius: 9px; transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1); }
-.signout-btn:hover { transform: translateX(1px); }
-.consent-badge { border-radius: 999px; }
 
 /* screen polish */
 .screen-header h2, .screen-head h1 { letter-spacing: -0.025em; }
@@ -705,6 +679,26 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
 .sheet-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); padding: 12px 8px 0; }
 .pulse-dot.off { background: var(--text-3); animation: none; }
 
+/* ═══ In-app landing homepage (#/landing) ═══════════════════════════════
+   Quieter than the marketing page: hero copy + real CTAs + quick tiles. */
+.app-home { padding-top: 40px; }
+.app-home .ah-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 18px; padding: 46px 0 40px; }
+.app-home .ah-brand .theme-logo { height: 64px; }
+.app-home .ah-title { font-size: clamp(32px, 4.2vw, 48px); letter-spacing: -0.03em; line-height: 1.08; font-weight: 700; margin: 0; }
+.app-home .ah-sub { color: var(--text-2); font-size: 16px; line-height: 1.6; max-width: 58ch; margin: 0 auto; }
+.app-home .ah-ctas { justify-content: center; margin-top: 6px; }
+.app-home .ah-quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+.app-home .ah-quick-card {
+  display: flex; align-items: center; gap: 11px; padding: 14px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--card); cursor: pointer;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, border-color 0.22s ease;
+}
+.app-home .ah-quick-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.app-home .ah-quick-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.app-home .ah-quick-card svg:last-child { margin-left: auto; opacity: 0.5; }
+@media (max-width: 1024px) { .app-home .ah-quick { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .app-home .ah-quick { grid-template-columns: 1fr; } .app-home .ah-hero { padding: 26px 0 30px; } }
+
 /* ═══ Dashboard recomposition: hierarchy instead of four equal cards ═══ */
 .dash-hero {
   display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 26px;
@@ -756,7 +750,7 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
   .fn-groups { display: none; }
   .nav-burger { display: inline-flex; }
   .nav-kbd { display: none; }
-  .nav-account-trigger .sidebar-user-meta { display: none; }
+  .nav-account-trigger .account-user-meta { display: none; }
   .worker-dot { display: none; }
   .nav-panel { position: fixed; top: 68px; left: 8px; right: 8px; min-width: 0; width: auto; }
   .nav-panel-4 { grid-template-columns: 1fr; min-width: 0; }

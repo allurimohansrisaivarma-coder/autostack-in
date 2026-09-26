@@ -157,8 +157,9 @@ pipeline, trust chapter, structured footer) and a hero-split sign-in — authori
 unchanged and still enforced server-side.
 
 Navigation is a **floating top bar, not a sidebar**. On desktop it is a centered pill:
-logo · Product / Operate / Trust dropdowns (grouped panels with icons and
- descriptions) · worker status dot · ⌘K search · notifications · account menu.
+logo (click → landing homepage) · Product / Operate / Trust dropdowns (grouped panels
+with icons and descriptions) · worker status dot · ⌘K search · notifications · account
+menu.
 At ≤860px the groups collapse into a hamburger that opens a grouped, accordion
 navigation sheet (with focus trap, Escape, backdrop); the top bar carries only
 burger · logo · account. Dropdowns close on outside click, Escape, and route change.

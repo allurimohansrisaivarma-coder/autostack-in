@@ -105,7 +105,7 @@ export function AccountMenu({ identity, isOwner, onNavigate, onSignOut, compact 
       >
         <span className="avatar">{user ? user.username.slice(0, 2).toUpperCase() : 'SV'}</span>
         {!compact && user && (
-          <span className="sidebar-user-meta">
+          <span className="account-user-meta">
             <span className="user-name">{user.display_name || user.username}</span>
             <span className="user-role">{identity.role} · {identity.capabilities.tier}</span>
           </span>
@@ -435,7 +435,7 @@ export function FloatingNav({ page, setPage, identity, isOwner, live, onSignOut 
           <Icon d={ICONS.list} size={19} />
         </button>
 
-        <button className="fn-brand" aria-label="AutoStack IN — home" onClick={() => setPage('dashboard')}>
+        <button className="fn-brand" aria-label="AutoStack IN — home" title="Home" onClick={() => setPage('landing')}>
           <span className="logo-chip">
             <ThemeLogo lockup={false} h={26} surface="dark" />
           </span>

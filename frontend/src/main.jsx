@@ -7,7 +7,7 @@ import { subscribeLive, startLive } from './live.js';
 
 import { Icon, ICONS, StatusBadge } from './main-shared.jsx';
 import { PageTransition } from './premium.jsx';
-import { Landing, AuthScreen } from './landing.jsx';
+import { Landing, AuthScreen, AppHome } from './landing.jsx';
 import { FloatingNav } from './nav.jsx';
 
 // ─── tiny icon set (inline SVG so no dependency issues) ───────────────────────
@@ -189,7 +189,7 @@ function App() {
   // NotFound (never a blank screen).
   const pageForHash = () => {
     const h = (window.location.hash || '').replace(/^#/, '');
-    if (!h) return 'dashboard';
+    if (!h) return 'landing'; // root URL → landing homepage
     // Settings owns its sub-path (#/settings/<section>); the app router only
     // needs to know the context is "settings".
     if (h.startsWith('settings')) return 'settings';
@@ -245,6 +245,7 @@ function App() {
   // navigation buttons that call setPage — they must receive it, or every one
   // of those buttons throws "setPage is not a function" on click.
   const screenMap = {
+    landing: <AppHome setPage={setPage} />,
     settings: <Settings identity={identity} onExit={() => setPage('dashboard')} setPage={setPage} />,
     profile: <Profile identity={identity} />,
     teams: <Teams identity={identity} />,

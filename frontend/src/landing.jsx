@@ -338,6 +338,55 @@ export function Landing({ onSignUp, onSignIn, workerUp }) {
   );
 }
 
+// ─── In-app landing homepage (#/landing) ───────────────────────────────────
+// The signed-in entry surface: logo, title, tagline, and real CTAs into the
+// product. Deliberately quieter than the marketing page — it orients, not sells.
+export function AppHome({ setPage }) {
+  const quick = [
+    { id: 'workflows', label: 'Workflows', desc: 'Manage automations & runs', icon: ICONS.flow },
+    { id: 'discovery', label: 'Discovery', desc: 'Evidence-based candidates', icon: ICONS.zap },
+    { id: 'trustlog', label: 'Trust Log', desc: 'Hash-chained audit trail', icon: ICONS.shield },
+    { id: 'settings', label: 'Settings', desc: 'Profile, appearance, security', icon: ICONS.cog },
+  ];
+  return (
+    <div className="screen app-home">
+      <div className="ah-hero">
+        <Reveal><span className="ah-brand"><ThemeLogo h={64} /></span></Reveal>
+        <Reveal delay={0.08}>
+          <h1 className="ah-title">Automation that earns <span className="grad">trust</span>.</h1>
+        </Reveal>
+        <Reveal delay={0.16}>
+          <p className="ah-sub">
+            AutoStack watches repeated desk work, drafts an automation, proves it in a
+            sandbox, and activates it only after a human approves — with a hash-chained
+            audit trail. Everything runs locally.
+          </p>
+        </Reveal>
+        <Reveal delay={0.24}>
+          <div className="hero-ctas ah-ctas">
+            <MagneticButton className="btn-hero" onClick={() => setPage('dashboard')}>
+              Go to Dashboard <Icon d={ICONS.arrow} size={16} />
+            </MagneticButton>
+            <button className="btn-ghost" onClick={() => setPage('create')}>Create automation</button>
+          </div>
+        </Reveal>
+      </div>
+      <StaggerReveal className="ah-quick">
+        {quick.map(q => (
+          <PremiumCard key={q.id} className="ah-quick-card" onClick={() => setPage(q.id)}>
+            <span className="npi-icon"><Icon d={q.icon} size={18} /></span>
+            <span className="npi-copy">
+              <span className="npi-label">{q.label}</span>
+              <span className="npi-desc">{q.desc}</span>
+            </span>
+            <Icon d={ICONS.chevron} size={15} />
+          </PremiumCard>
+        ))}
+      </StaggerReveal>
+    </div>
+  );
+}
+
 // ─── Auth hero (login/signup with landing context) ───────────────────────────
 export function AuthScreen({ children }) {
   return (

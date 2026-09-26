@@ -119,118 +119,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   min-height: 100vh;
 }
 
-/* ─── Sidebar ────────────────────────────────────────────────────────────────── */
-.sidebar {
-  background: var(--panel);
-  color: var(--text);
-  display: flex;
-  flex-direction: column;
-  padding: 20px 14px;
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow-y: auto;
-  overflow-x: hidden;
-  border-right: 1px solid var(--border-2);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 6px 20px;
-  border-bottom: 1px solid var(--border-2);
-  margin-bottom: 16px;
-}
-
-.brand-icon {
-  width: 34px;
-  height: 34px;
-  background: var(--accent);
-  color: var(--on-accent);
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-
-.brand-name {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--text);
-}
-
-.nav { display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; padding-bottom: 8px; }
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  color: var(--text-2);
-  font-size: 13.5px;
-  font-weight: 500;
-  transition: background 0.15s, color 0.15s;
-  text-align: left;
-  width: 100%;
-  position: relative;
-}
-
-.nav-item svg { flex-shrink: 0; opacity: 0.85; }
-.nav-item:hover { background: var(--accent-softer); color: var(--text); }
-.nav-item:hover svg { opacity: 1; }
-.nav-item.active { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.nav-item.active svg { color: var(--on-accent); opacity: 1; }
-.nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: -14px;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
-}
-
-.sidebar-footer { margin-top: auto; padding-top: 10px; }
-
-.consent-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--ok-soft);
-  color: var(--ok-strong);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 11.5px;
-  font-weight: 600;
-  margin-bottom: 14px;
-}
-
-.sidebar-user {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 8px 4px;
-}
-
-.signout-btn {
-  margin-left: auto;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
-  color: var(--text-3);
-  transition: background 0.15s, color 0.15s;
-  flex-shrink: 0;
-}
-
-.signout-btn:hover { background: var(--bad-soft); color: var(--bad); }
-.signout-btn svg { display: block; }
-
+/* ─── Shared atoms (account menu, popovers) ─────────────────────────────── */
 .avatar {
   width: 32px;
   height: 32px;
@@ -279,7 +168,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 button:focus:not(:focus-visible) { outline: none; }
 
 /* Smooth theme transition */
-body, .sidebar, .card, .main { transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
+body, .card, .main { transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease; }
 
 /* Native control theming */
 ::selection { background: var(--accent-soft); color: var(--text); }

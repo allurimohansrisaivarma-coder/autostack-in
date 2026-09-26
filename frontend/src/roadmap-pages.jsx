@@ -31,7 +31,7 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
       setToken(issued.token);
       const me = await api.authMe();
       setIdentity(me);
-      setPage('dashboard');
+      setPage('landing');
     } catch (err) {
       setMsg(err.message);
     } finally {
