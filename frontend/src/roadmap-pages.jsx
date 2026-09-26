@@ -76,54 +76,6 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
   );
 }
 
-// ── Home ──────────────────────────────────────────────────────────────────────
-
-export function Home({ setPage, identity }) {
-  const caps = identity && identity.capabilities;
-  return (
-    <div className="screen">
-      <header className="screen-head">
-        <div>
-          <h1>Home</h1>
-          <p className="muted">Setup and overview — everything below is live worker state.</p>
-        </div>
-        {caps && <span className="badge">{caps.tier} tier</span>}
-      </header>
-
-      <Card title="Setup checklist">
-        <Row>
-          <div>Worker connection</div>
-          <div className="badge ok">connected</div>
-        </Row>
-        <Row>
-          <div>Account</div>
-          <div>{identity && identity.user ? `${identity.user.username} (${identity.role})` : 'service token'}</div>
-        </Row>
-        <Row>
-          <div>Observation consent</div>
-          <div className="muted">Settings → Permissions</div>
-        </Row>
-        <Row>
-          <div>Create your first automation</div>
-          <button className="link" onClick={() => setPage('create')}>Open the wizard →</button>
-        </Row>
-      </Card>
-
-      <div className="grid2">
-        <Card title="Jump back in">
-          <Row><button className="link" onClick={() => setPage('dashboard')}>Dashboard — live runs &amp; metrics</button></Row>
-          <Row><button className="link" onClick={() => setPage('discovery')}>Discovery — evidence-based candidates</button></Row>
-          <Row><button className="link" onClick={() => setPage('workflows')}>Workflows — versions, runs, controls</button></Row>
-        </Card>
-        <Card title="This workspace">
-          <Row><div>Tier: {caps ? caps.tier : '…'}</div></Row>
-          <Row><div>Local-only mode: {caps && caps.local_only ? 'ON (no cloud calls)' : 'off'}</div></Row>
-          <Row><button className="link" onClick={() => setPage('profile')}>Profile &amp; API tokens →</button></Row>
-        </Card>
-      </div>
-    </div>
-  );
-}
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
