@@ -190,8 +190,11 @@ Frontend motion is centrally gated (`frontend/src/motion.js`): level 0 static
 spotlight cards, ambient hero fields — live in `frontend/src/styles-premium.css`
 with reusable primitives (`GlassSurface`, `PremiumCard`, `MagneticButton`,
 `Reveal`, `ScrollText`, `ContainerScroll`, `BentoGrid`, `SpringPopover`,
-`PageTransition`) in `frontend/src/premium.jsx`. The brand
-mark (`brand.jsx`) stays blue in light mode and glass-white in dark mode.
+`PageTransition`) in `frontend/src/premium.jsx`. The brand mark (`brand.jsx`)
+follows the theme (metallic in light, glowing white in dark) on theme-following
+surfaces; inside the floating nav it sits on a fixed dark `logo-chip` tile so
+the white mark keeps ≥15:1 contrast in **both** themes (assets are regenerated
+full-opacity by `scripts/process_logos.py`).
 
 ### Roles
 

@@ -45,19 +45,27 @@ def unmix_against_black(rgb, strength):
 
 
 def process_light():
-    """Metallic 'A' on near-black; wordmark is dark gray (must survive keying)."""
+    """Metallic 'A' on near-black. v2: the mark must render fully opaque and
+    clearly visible — the old half-keyed alpha (mean ~95/255) made it a faint
+    smudge on glass surfaces. Floor-key the background, then make every
+    content pixel fully opaque and stretch its luminance into a readable
+    metallic range so it holds up on white cards AND mid-tone glass."""
     im = Image.open(SRC_LIGHT).convert("RGB")
     rgb = np.array(im).astype(np.float64)
-    # near-black background removal: anything below the floor becomes transparent
     floor = 26.0
     lum = rgb.max(axis=-1)
-    alpha = np.clip((lum - floor) / (60.0 - floor) * 255.0, 0, 255).astype(np.uint8)
-    # the wordmark (~ rgb 30-35) would be cut by that floor, so lift alpha where
-    # pixels are "grayish and contiguous with the mark" — simplest robust move:
-    # treat mid-gray (25..80) as partially opaque
-    mid = (lum >= 24) & (lum < 80)
-    alpha[mid] = np.maximum(alpha[mid], 140)
-    out = np.dstack([rgb.astype(np.uint8), alpha])
+    # background keying: below floor -> transparent, smooth ramp to opaque
+    alpha_f = np.clip((lum - floor) / (60.0 - floor), 0.0, 1.0)
+    # content pixels (anything not background) become fully opaque
+    content = lum >= floor
+    alpha_f[content] = 1.0
+    # luminance contrast stretch on content: map [floor..255] -> [55..205]
+    lo, hi = floor, 255.0
+    stretched = (rgb - lo) / max(hi - lo, 1.0)
+    stretched = np.clip(stretched, 0.0, 1.0) * 150.0 + 55.0
+    out_rgb = np.where(content[..., None], stretched, rgb)
+    out = np.dstack([out_rgb.clip(0, 255).astype(np.uint8),
+                     (alpha_f * 255).astype(np.uint8)])
     img = Image.fromarray(out, "RGBA")
     return autocrop(img)
 

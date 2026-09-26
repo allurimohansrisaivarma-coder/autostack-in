@@ -1,19 +1,22 @@
 // Brand identity: real logo assets (user-supplied lockups processed to
-// transparent PNGs). Light theme → dark metallic lockup; dark theme →
-// glowing white lockup. Swap happens through theme CSS ([data-theme]), so
-// "system" mode adapts automatically. BrandMark (inline SVG) kept as a
-// dependency-free fallback.
+// transparent PNGs; see scripts/process_logos.py). Light theme → metallic
+// lockup; dark theme → glowing white lockup. Swap happens through theme CSS
+// ([data-theme]), so "system" mode adapts automatically.
+// surface="dark" forces the white variant — for surfaces that stay dark in
+// BOTH themes (the floating nav's glass chip); using the theme swap there
+// made the metallic mark vanish on dark glass in light mode.
 import React from 'react';
 import lockupLight from './assets/autostack-lockup-light.png';
 import lockupDark from './assets/autostack-lockup-dark.png';
 import markLight from './assets/autostack-mark-light.png';
 import markDark from './assets/autostack-mark-dark.png';
 
-export function ThemeLogo({ lockup = true, h = 26, glow = false, title = 'AutoStack' }) {
+export function ThemeLogo({ lockup = true, h = 26, glow = false, title = 'AutoStack', surface = 'theme' }) {
   const light = lockup ? lockupLight : markLight;
   const dark = lockup ? lockupDark : markDark;
+  const forced = surface === 'dark' ? ' logo-forced-dark' : '';
   return (
-    <span className={`theme-logo${glow ? ' logo-glow' : ''}`} style={{ height: h }} title={title}>
+    <span className={`theme-logo${glow ? ' logo-glow' : ''}${forced}`} style={{ height: h }} title={title}>
       <img className="logo-light" src={light} alt={title} />
       <img className="logo-dark" src={dark} alt="" aria-hidden="true" />
     </span>
