@@ -267,7 +267,8 @@ curl -s "$B/api/candidates" -H "$H"
 ## UI theme system
 
 Three modes — **Light**, **Dark**, **System** (follows the OS and live-updates when the
-OS theme changes) — switchable from the sidebar and persisted across sessions. All colors
+OS theme changes) — switchable from the account menu (Appearance) and persisted across
+sessions. All colors
 come from CSS custom properties (design tokens) on `:root` / `[data-theme="dark"]`; the
 choice is applied by an inline boot script before first paint, so there is no flash of the
 wrong theme. Terminal/monitor surfaces are intentionally always-dark in both themes.

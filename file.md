@@ -1,32 +1,44 @@
 # Codebase file guide
 
-The project is grouped by responsibility so teammates can find their work quickly. This guide covers every project-owned file; installed libraries and generated output are grouped at the end.
+The project is grouped by responsibility so teammates can find their work quickly. This guide covers every project-owned area; installed libraries and generated output are grouped at the end.
 
-**Current stage:** `frontend/` is the React visual demo. `backend/` and `browser-extension/` contain the working Phase 1 proofs using invented data. No backend web server, background desktop agent, AI generation, execution runner, or live registry has been implemented yet.
+**Current stage:** the application is a running local-first automation platform — a FastAPI worker (`backend/`, `:8747`, embedded Node-RED on `:18790`) with SQLite persistence, a React 19 + Vite frontend (`frontend/`, dev `:5173`), a capture layer (`backend/capture/`, `browser-extension/`), and a QA suite (`tests/`, `scripts/qa_probe.py`, `scripts/scenario_battery.py`, `scripts/authz_matrix.py`). The frontend talks to the live worker; demo data appears only when the worker is unreachable.
 
 ## Folder layout
 
 ```text
-SIH_26/
-├── frontend/             React dashboard and its build tools
-│   ├── src/              Screen code and styles
-│   ├── index.html        Browser entry page
+BLUE-copy/
+├── frontend/             React 19 + Vite app (floating nav shell, landing, settings)
+│   ├── src/              Screens, navigation, design system, API client
+│   ├── src/assets/       Theme-aware logo assets (light/dark marks + lockups)
+│   ├── public/           Theme-aware favicons
+│   ├── index.html        Browser entry page (theme boot script, theme favicons)
 │   └── package*.json     Frontend dependencies and commands
-├── backend/              Python comparison and event-validation logic
+├── backend/              FastAPI worker: API, engine, persistence, security
+│   ├── security/         Token guards (RBAC), hash-chained audit ledger, safe IO
+│   ├── engine/           Workflow engine: generation, runner, journal, rollback
+│   ├── detection/        Evidence-based pattern detection service
+│   ├── capture/          Local capture watcher
+│   └── nodebridge/       Flow compiler for the embedded Node-RED runtime
 ├── browser-extension/    Capture script, worker, and event popup
+├── deploy/               Deployment assets
+├── desktop/              Desktop shell assets
 ├── shared/
 │   └── contracts/        Data formats shared between components
 ├── tests/
+│   ├── spike/            Backend suite: identity, RBAC, lifecycle, registry, e2e
 │   ├── unit/             Python correctness and rejection tests
-│   ├── browser/          Browser capture and UI checks
-│   ├── fixtures/         Invented records and sample office page
+│   ├── browser/          Browser capture and UI checks (Playwright)
+│   ├── fixtures/         Sample records and office page
 │   └── package*.json     Browser-test dependencies and commands
-├── docs/                 Phase 1 setup, contracts, and progress evidence
-├── artifacts/            Generated reports/screenshots; ignored by Git
-├── README.md             Project overview
+├── docs/                 Phase docs, contracts, platform matrix, test reports
+├── artifacts/            Runtime state (worker token, logs); ignored by Git
+├── scripts/              Worker launcher, QA probes, authz matrix, logo pipeline
+├── README.md             Product overview, setup, architecture, roles, FAQ
 ├── plan.md               Development phases and safety gates
 ├── file.md               This file guide
-├── package.json          Convenient commands from the repository root
+├── requirements.txt      Pinned Python dependencies for the worker
+├── package.json          Convenient root commands
 └── .gitignore            Files Git should exclude
 ```
 
@@ -34,125 +46,80 @@ SIH_26/
 
 | File | Purpose |
 | --- | --- |
-| [README.md](README.md) | Product idea, current progress, software/services, security rules, office examples, and frontend setup. Read first. |
-| [plan.md](plan.md) | Phases, targets, complications, security requirements S1–S11, and completion gates. Guides what to build next. |
+| [README.md](README.md) | Product idea, setup, architecture, design system, roles, verification commands, FAQ. Read first. |
+| [plan.md](plan.md) | Phases, targets, security requirements S1–S11, and completion gates. |
 | [file.md](file.md) | This map. Update alongside new, moved, or removed files. |
-| [package.json](package.json) | Shortcuts that install or run the frontend/tests. Has no dependencies of its own; dependency lockfiles belong to `frontend/` and `tests/`. |
-| [.gitignore](.gitignore) | Excludes installed dependencies, builds, artifacts, caches, virtual environments, and local environment-secret files. Does not encrypt files or prevent cloud-folder syncing. |
+| [requirements.txt](requirements.txt) | Pinned Python libraries for the worker (FastAPI, SQLAlchemy, APScheduler, uvicorn, …). |
+| [package.json](package.json) | Root shortcuts for frontend/test commands; no dependencies of its own. |
+| [.gitignore](.gitignore) | Excludes `.venv/`, `node_modules/`, `dist/`, `artifacts/`, caches, `.env*`. |
 
-Run these commands from the repository root. Use `npm.cmd` in PowerShell if `npm` is blocked by script execution policy.
+Backend setup: `python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt` (Windows Git Bash paths; use `.venv/bin` on Linux/macOS).
 
 | Command | What it does |
 | --- | --- |
-| `npm run setup` | Installs frontend and browser-test JavaScript dependencies from their existing lockfiles, without install scripts. |
-| `npm run dev` | Starts the React development server on this computer only. |
-| `npm run build` | Builds the frontend into `frontend/dist/`. |
-| `npm run preview` | Serves that built frontend locally. |
-| `npm run test:unit` | Runs the Python unit tests; requires the Python dependencies first. |
-| `npm run test:browser` | Runs browser capture/UI checks; requires Playwright's Chromium and the Python dependencies. |
-
-Full Python/browser setup and manual confirmation are in [docs/phase-1.md](docs/phase-1.md). For frontend-only installation, use `npm ci --ignore-scripts --prefix frontend`. A bare `npm ci` at the root is not the setup command.
+| `.venv/Scripts/python.exe scripts/run_worker.py` | Starts the worker + in-process trigger loop (`:8747`, Node-RED on `:18790`). |
+| `cd frontend && npm install && npm run dev` | Starts the Vite dev server (`:5173`). |
+| `cd frontend && npm run build` | Production build into `frontend/dist/`. |
+| `.venv/Scripts/python.exe -m pytest -q` | Full backend test suite (`tests/spike/`, `tests/unit/`). |
+| `.venv/Scripts/python.exe scripts/qa_probe.py` | 57-check live API battery against a running worker. |
+| `AUTOSTACK_TOKEN=$(cat artifacts/spike/token) .venv/Scripts/python.exe scripts/scenario_battery.py` | 31-check end-to-end workflow scenarios. |
+| `AUTOSTACK_TOKEN=$(cat artifacts/spike/token) .venv/Scripts/python.exe scripts/authz_matrix.py` | 147-check authorization matrix (all roles, IDOR, escalation). |
+| `npm run test:browser` | Playwright browser checks (requires Chromium + Python deps). |
 
 ## Frontend: what the user sees
 
 | File | Purpose |
 | --- | --- |
-| [frontend/index.html](frontend/index.html) | Browser entry page; provides the `root` element and loads `/src/main.jsx` relative to the frontend server. |
-| [frontend/src/main.jsx](frontend/src/main.jsx) | All six React screens, navigation, cards/details, sample data, creation steps, and simulated monitoring/sandbox interactions. Demo confidence, savings, tests, and audit entries are illustrative. |
-| [frontend/src/styles.css](frontend/src/styles.css) | Sidebar, spacing, colors, typography, cards, tables, buttons, badges, and terminal appearance. Imports external fonts; offline reference screenshots use fallback fonts. |
-| [frontend/package.json](frontend/package.json) | Frontend `dev`, `build`, and `preview` commands plus pinned React/Vite-related dependencies. |
-| [frontend/package-lock.json](frontend/package-lock.json) | npm's exact frontend dependency versions and integrity values. Keep with the manifest; let npm manage dependency updates. |
+| [frontend/index.html](frontend/index.html) | Entry page; theme boot script (no flash of wrong theme) and theme-aware favicons. |
+| [frontend/src/main.jsx](frontend/src/main.jsx) | Hash router, auth state, screen map, floating-nav shell, NotFound recovery. |
+| [frontend/src/nav.jsx](frontend/src/nav.jsx) | Floating navigation: desktop dropdown groups, account menu, notifications panel, ⌘K command palette, mobile grouped sheet. |
+| [frontend/src/screens-live.jsx](frontend/src/screens-live.jsx) | Dashboard (execution-health hero, honest metrics), Workflows, Registry, Trust Log — live worker data. |
+| [frontend/src/settings.jsx](frontend/src/settings.jsx) | Dedicated two-pane Settings (`#/settings/<section>`), owner-gated Organization. |
+| [frontend/src/landing.jsx](frontend/src/landing.jsx) | Marketing landing: scroll-expansion hero, container-scroll product window, bento, trust chapter. |
+| [frontend/src/roadmap-pages.jsx](frontend/src/roadmap-pages.jsx) | Login, Profile, Teams, Runners, Scheduling (role-gated forms). |
+| [frontend/src/roadmap-complete.jsx](frontend/src/roadmap-complete.jsx) | Notifications center, Data & Privacy, Connectors. |
+| [frontend/src/create-automation.jsx](frontend/src/create-automation.jsx) | Guided create flow: plan → generate → sandbox test → approve → bind. |
+| [frontend/src/api.js](frontend/src/api.js) | Typed worker API client (token in `localStorage`, Authorization header). |
+| [frontend/src/live.js](frontend/src/live.js) | 4 s polling bridge; anonymous users never poll (no 401 loops). |
+| [frontend/src/premium.jsx](frontend/src/premium.jsx) | Reusable primitives: GlassSurface, Reveal, ScrollText, ContainerScroll, PremiumCard, SpringPopover, ThemeSwitcher. |
+| [frontend/src/motion.js](frontend/src/motion.js) | Motion levels (reduced/touch/full), springs, easings, durations. |
+| [frontend/src/brand.jsx](frontend/src/brand.jsx) | Theme-aware logo (light/dark PNG swap). |
+| [frontend/src/styles.css](frontend/src/styles.css) | Base tokens and component styles. |
+| [frontend/src/styles-premium.css](frontend/src/styles-premium.css) | Premium materials, floating nav, dashboard hero, landing sections, effect gates. |
 
-`.jsx` holds React interface code; `.css` controls appearance. Preserve the existing visual identity as real functionality is added.
-
-## Backend: Python logic
-
-| File | Purpose |
-| --- | --- |
-| [backend/__init__.py](backend/__init__.py) | Python package marker, enabling commands such as `python -m backend.file_diff`. Identifies the current code as synthetic-data proofs. |
-| [backend/file_diff.py](backend/file_diff.py) | Reads two supported sample CSV/XLSX versions, matches rows by `ClientID`, and reports added/removed records and changed column names without returning cell values. Rejects unsupported workbook content and checks file/row/cell limits. It does not watch folders, write changes, or provide production parser isolation. |
-| [backend/validate_events.py](backend/validate_events.py) | Loads shared schemas and validates exported events, including timestamps, allowed fields, a maximum batch size, and duplicate IDs within a batch. Can run as a command. Validation does not grant execution permission. |
-| [backend/requirements.txt](backend/requirements.txt) | Pinned Python libraries: `openpyxl` for XLSX, `defusedxml` for XML safeguards, and `jsonschema` for structured-data checks. A complete indirect-dependency lock remains future work. |
-
-The backend folder is the home for future application logic. Its existence does not mean FastAPI, persistence, or workflow execution is already running.
-
-## Browser extension: sample-page observation
-
-Capture is restricted to exactly `http://127.0.0.1:4174/office.html`, including the port/path. Use a dedicated test profile and invented data.
+## Backend: the worker
 
 | File | Purpose |
 | --- | --- |
-| [browser-extension/manifest.json](browser-extension/manifest.json) | Extension name/version, storage permission, sample-page match, capture script, worker, and popup. Scripts additionally enforce the exact URL/port. |
-| [browser-extension/capture.js](browser-extension/capture.js) | Observes browser-dispatched Open record / Save draft clicks with the sample page's success signal. Sends only action, sample ID, and time. Collects neither typed text nor clipboard contents. |
-| [browser-extension/worker.js](browser-extension/worker.js) | Validates message source/shape and stores up to 100 minimized events in extension-local storage. This is an extension worker, not the future operating-system background agent. |
-| [browser-extension/events.html](browser-extension/events.html) | Popup displaying events with Refresh and Delete fixture events controls. |
-| [browser-extension/events.js](browser-extension/events.js) | Reads stored events as text and handles popup refresh/deletion. |
+| [backend/app.py](backend/app.py) | FastAPI app: workflows, runs, events, artifacts, approvals, registry, CORS allowlist, bootstrap. |
+| [backend/roadmap_routes.py](backend/roadmap_routes.py) | Identity, capabilities/tier, teams, runners, triggers, gates, governance, privacy, webhook triggers. |
+| [backend/security/tokens.py](backend/security/tokens.py) | Service + user token auth, role guards (`require_writer/tester/publisher/admin`), permission ladder. |
+| [backend/security/audit.py](backend/security/audit.py) | Hash-chained, append-only audit ledger with chain verification. |
+| [backend/security/safeio.py](backend/security/safeio.py) | Constrained file IO helpers. |
+| [backend/identity.py](backend/identity.py) | Local accounts: PBKDF2-SHA256 (200k iterations) password hashing, API tokens. |
+| [backend/teams.py](backend/teams.py) | Roles (observer/operator/approver/owner) and permission minimums. |
+| [backend/entitlements.py](backend/entitlements.py) | Tier capabilities (solo/team/enterprise/government/developer). |
+| [backend/models.py](backend/models.py) | SQLAlchemy models: users, memberships, workflows, runs, audit, settings, … |
+| [backend/db.py](backend/db.py) | SQLite engine (WAL, foreign keys, busy timeout). |
+| [backend/engine/](backend/engine/) | Workflow engine: runner, effect journal (exactly-once), rollback, generation, AI adapter. |
+| [backend/detection/](backend/detection/) | Evidence-based pattern detection (no invented confidence). |
+| [backend/capture/](backend/capture/) | Local capture watcher (approved apps, redacted values). |
+| [backend/nodebridge/](backend/nodebridge/) | Compiles workflows to Node-RED flows. |
+| [backend/spike_config.py](backend/spike_config.py) | Configuration. |
 
-## Shared contracts: agreed data formats
+## Verification & docs
 
-A **contract** defines the shape and meaning of information exchanged between components; a **schema** provides machine-readable rules for that shape.
-
-| File | Purpose |
+| Path | Purpose |
 | --- | --- |
-| [shared/contracts/event.schema.json](shared/contracts/event.schema.json) | Allowed synthetic event fields, sources/actions, sample record keys, and changed field names. Rejects additional raw-value or approval fields. Used by backend validation and tests. |
-| [shared/contracts/runner-report.schema.json](shared/contracts/runner-report.schema.json) | Proposed future report shape: job/owner/runner identity, hashes, checks, timestamps, and signature fields. A passed report cannot contain failed checks. Does not implement isolation, authenticate signatures, or approve workflows. |
+| [tests/spike/](tests/spike/) | Backend suite: identity, RBAC, lifecycle, registry, hardening, end-to-end. |
+| [tests/unit/](tests/unit/) | Python correctness tests (file diff, event validation). |
+| [tests/browser/](tests/browser/) | Playwright capture/UI checks. |
+| [scripts/qa_probe.py](scripts/qa_probe.py) | 57 live API checks. |
+| [scripts/scenario_battery.py](scripts/scenario_battery.py) | 31 end-to-end workflow scenarios. |
+| [scripts/authz_matrix.py](scripts/authz_matrix.py) | 147-check authorization matrix. |
+| [scripts/process_logos.py](scripts/process_logos.py) | One-off logo asset pipeline (Pillow + numpy). |
+| [docs/](docs/) | Phase docs, API contracts, platform matrix, test reports and fix plans. |
+| [deploy/](deploy/) · [desktop/](desktop/) | Deployment and desktop-shell assets. |
+| [browser-extension/](browser-extension/) | Capture extension (inbound events are validated server-side). |
 
-See [docs/contracts.md](docs/contracts.md) for the intended behavior behind these formats.
-
-## Tests: checks and invented examples
-
-A **fixture** is a prepared input or expected result used for testing. All client records here are invented. `.cjs` is JavaScript run by Node.js; `.py` is Python.
-
-| File | Purpose |
-| --- | --- |
-| [tests/package.json](tests/package.json) | Pins Playwright; its local `test` command runs the browser checks. |
-| [tests/package-lock.json](tests/package-lock.json) | Exact browser-test npm dependencies, separate from frontend dependencies. |
-| [tests/browser/capture-and-ui.cjs](tests/browser/capture-and-ui.cjs) | Starts temporary sample/Vite servers, loads the extension in a fresh Chromium profile, verifies accepted/rejected observations, exports/validates events, and screenshots the React screens. Writes evidence, closes its servers/browser, and deletes the temporary profile. |
-| [tests/unit/__init__.py](tests/unit/__init__.py) | Empty Python package marker for the unit-test directory. |
-| [tests/unit/test_file_diff.py](tests/unit/test_file_diff.py) | Twelve tests for comparison results, reordering/add/remove, invalid IDs/rows, formulas, bounds, XLSX equivalence, unsafe XML, and malformed/unsupported workbooks. Creates temporary XLSX/invalid inputs when running. |
-| [tests/unit/test_contracts.py](tests/unit/test_contracts.py) | Eight tests for schemas/events, raw-value exclusion, timestamps, duplicate IDs, batch limits, changed-field requirements, and report shape. Does not test a real sandbox or signer. |
-| [tests/fixtures/clients-before.csv](tests/fixtures/clients-before.csv) | Three invented clients before changes; comparison input. |
-| [tests/fixtures/clients-after.csv](tests/fixtures/clients-after.csv) | Prepared saved version with C001/C003 set to `Draft prepared` and rows reordered; C002 unchanged. Not output from an implemented automation. |
-| [tests/fixtures/expected-diff.json](tests/fixtures/expected-diff.json) | Independent expected comparison result: two `Status` changes, no added/removed records. |
-| [tests/fixtures/office.html](tests/fixtures/office.html) | Sample office page with client selection, record display, draft editor, unobserved test input, and deletion. Own small stylesheet; does not replace React. |
-| [tests/fixtures/office.js](tests/fixtures/office.js) | Opens sample records, saves drafts to the test browser's local storage, reports success/failure, and deletes drafts. Sends no email. |
-
-## Docs: setup and evidence
-
-| File | Purpose |
-| --- | --- |
-| [docs/phase-1.md](docs/phase-1.md) | Setup, automated commands, manual extension walkthrough, expected results, cleanup, and the Phase 1 confirmation checklist. |
-| [docs/contracts.md](docs/contracts.md) | Event meanings, first business rule, planned workflow states, permissions, runner trust, resource limits, cleanup, and responsible roles. Separates implemented checks from planned enforcement. |
-| [docs/phase-1-status.md](docs/phase-1-status.md) | Recorded results, versions, frontend fingerprints, limitations, and pending work. Add actual manual/platform/runner evidence here; never mark checks passed without performing them. |
-
-## Generated and local files
-
-These are tool-generated, not application source. Their presence varies between teammates' computers.
-
-| Location / files | Purpose and handling |
-| --- | --- |
-| `frontend/node_modules/`, `tests/node_modules/` | Installed third-party JavaScript libraries. Ignored by Git. Change manifests and reinstall instead of editing library internals. |
-| `frontend/dist/index.html`, `frontend/dist/assets/*` | Built frontend HTML/CSS/JavaScript. Asset names contain generated hashes. Ignored; change source and rebuild. |
-| `.venv/` | Optional local Python environment. Ignored by Git. |
-| `__pycache__/` and the `.pyc` files inside | Generated Python import caches, ignored by Git. |
-| `artifacts/phase-1/browser-report.json` | Latest browser-check status, timestamp, versions, checks, source hashes, screenshot names, and limitations. A development report, not a signed execution approval. |
-| `artifacts/phase-1/capture-events.json` | Four minimized synthetic events from a successful browser run. No client names, email addresses, or draft bodies. |
-| `artifacts/phase-1/dashboard.png`, `discovery.png`, `registry.png`, `workflows.png`, `create.png`, `trust-log.png` | Six main-screen references; every listed PNG is in `artifacts/phase-1/`. |
-| `artifacts/phase-1/discovery-detail.png`, `registry-detail.png`, `workflow-detail.png` | Three selected detail states, in the same artifacts folder. |
-| `artifacts/phase-1/create-step-2.png` through `create-step-5.png` | Other creation steps; 13 screenshots total including those above. |
-| `artifacts/phase-1/browser-profile-*` | Temporary test-browser profiles, normally removed during cleanup. Never use a personal browser profile here. |
-| `.env`, `.env.*`, `*.local` | Git-excluded local configuration patterns. No API key is required for current proofs; this is not an implemented secret-management system. |
-| `.git/` | Git's internal history/configuration. Use Git commands instead of editing these as source. |
-
-All of `artifacts/` is ignored by Git. Teammates generate their own evidence with the documented commands. The presentation PDF remains an external reference, not a runtime file inside this repository.
-
-## How the components connect today
-
-- **Demo UI:** `frontend/index.html` → React screen code and styles.
-- **Capture proof:** `tests/fixtures/office.html` / `office.js` → extension capture → extension worker → popup. The browser test exports observations for the Python validator.
-- **File proof:** sample before/after files → `backend/file_diff.py` → changed-field summary checked against the expected fixture.
-- **Verification:** Python and browser tests use `shared/contracts/`, write browser evidence to `artifacts/`, and have their results summarized in `docs/phase-1-status.md`.
-
-These remain separate proofs. Later phases connect observation, detection, approvals, isolated runs, and the React interface according to `plan.md`.
-
-*Updated: 20 September 2026. Files are organized by responsibility rather than development phase.*
+**Current stage (repeated for skimmers):** worker, frontend, and QA batteries are all live and passing. `artifacts/` is Git-ignored and holds runtime secrets — never commit it.
