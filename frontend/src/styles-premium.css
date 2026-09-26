@@ -699,6 +699,116 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
 @media (max-width: 1024px) { .app-home .ah-quick { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px) { .app-home .ah-quick { grid-template-columns: 1fr; } .app-home .ah-hero { padding: 26px 0 30px; } }
 
+/* ═══ Polish system — unified controls, type scale, tables, states ═══════
+   Single override layer (loads last): one spacing rhythm, one control style,
+   one page-title scale. Subtle refinements only — no redesign. */
+
+/* Type scale: every page-level title identical; meta text gets real leading. */
+.screen-header h2, .screen-head h1 {
+  font-size: 26px; font-weight: 650; letter-spacing: -0.022em; line-height: 1.2;
+}
+.settings-head h1 { font-size: 24px; font-weight: 650; letter-spacing: -0.02em; }
+.screen-header .profile-sub, .screen-head .muted, .settings-head p {
+  font-size: 13.5px; line-height: 1.55; margin: 4px 0 0;
+}
+.muted { line-height: 1.55; }
+.card-head h3 { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+
+/* Controls: one family. Same radius, padding, type, states everywhere. */
+.btn, .btn-primary, .btn-outline, .btn-dark, button.primary, .btn-hero {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  border-radius: 10px; padding: 9px 15px; font-size: 13.5px; font-weight: 600;
+  letter-spacing: 0; line-height: 1.2; cursor: pointer;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease,
+              background 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+}
+.btn:disabled, .btn-primary:disabled, .btn-outline:disabled, .btn-dark:disabled,
+button.primary:disabled {
+  opacity: 0.45; cursor: not-allowed; transform: none !important; box-shadow: none !important;
+}
+.btn:not(:disabled):active, .btn-primary:not(:disabled):active,
+.btn-outline:not(:disabled):active, .btn-dark:not(:disabled):active,
+button.primary:not(:disabled):active { transform: scale(0.98); }
+
+/* Generic .btn had NO base style before (square, borderless) — give it one. */
+.btn {
+  border: 1px solid var(--border-strong); background: var(--card); color: var(--text);
+}
+.btn:not(:disabled):hover { border-color: var(--accent); color: var(--text); transform: translateY(-1px); }
+
+/* Text/link buttons: real touch targets. */
+.link, .link-btn {
+  font-size: 13px; font-weight: 600; padding: 4px 6px; border-radius: 7px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.link:hover, .link-btn:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+
+/* Chips (filters, tiers) — pill family. */
+.chip { padding: 6px 14px; font-size: 12.5px; font-weight: 600; transition: all 0.16s ease; }
+.chip:not(.on):not(:disabled):hover { border-color: var(--accent); color: var(--text); }
+
+/* Forms: one input system. */
+.field input, .field select, .login-card input, .search-box input,
+.settings-body input, .settings-body select, .card input:not([type="checkbox"]), .card select {
+  border-radius: 10px; padding: 9px 12px; font-size: 13.5px; line-height: 1.35;
+  border: 1px solid var(--border-strong); background: var(--input-bg); color: var(--text);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.field input:hover, .field select:hover, .login-card input:hover,
+.settings-body input:hover, .settings-body select:hover,
+.card input:not([type="checkbox"]):hover, .card select:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong)); }
+.field input:focus, .field select:focus, .login-card input:focus,
+.settings-body input:focus, .settings-body select:focus,
+.card input:not([type="checkbox"]):focus, .card select:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--shadow-focus);
+}
+
+/* Cards: one radius + breathing room. */
+.card { border-radius: 16px; padding: 16px 18px; }
+.metric-card { border-radius: 16px; }
+
+/* Tables: compact-professional. */
+.full-table th { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding: 11px 16px; }
+.full-table td { font-size: 13px; padding: 11px 16px; }
+.full-table tbody tr { transition: background 0.14s ease; }
+.full-table tbody tr:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+
+/* States: empty + error banners feel designed, not default. */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  text-align: center; color: var(--text-3); padding: 32px 24px !important;
+}
+.empty-state svg { opacity: 0.45; }
+.empty-state p { margin: 0; max-width: 44ch; font-size: 13px; line-height: 1.55; }
+.error { border-radius: 10px; padding: 10px 13px; font-size: 13px; line-height: 1.5; }
+
+/* Rhythm: consistent screen gap + wider content on big displays. */
+.screen { gap: 16px; padding: 26px 34px 48px; }
+.two-col { gap: 16px; }
+.settings-content, .settings-body { gap: 16px; }
+/* Section anchors clear the floating nav when scroll-targeted. */
+.chapter { scroll-margin-top: 88px; }
+.nav-panel-item { padding: 10px 11px; }
+.notif-row { padding: 9px; }
+@media (min-width: 1600px) { .screen { max-width: 1280px; } }
+
+/* Premium scrollbars (WebKit) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--text-3); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Landing homepage: more presence, calmer center, sliding arrows. */
+.app-home { padding-top: 26px; }
+.app-home .ah-hero { padding: 58px 0 46px; gap: 20px; position: relative; }
+.app-home .ah-hero::before {
+  content: ""; position: absolute; inset: -40px 0 auto; height: 320px; pointer-events: none;
+  background: radial-gradient(560px 200px at 50% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%);
+}
+.app-home .ah-title { font-size: clamp(34px, 4.4vw, 52px); }
+.app-home .ah-quick-card svg:last-child { transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease; }
+.app-home .ah-quick-card:hover svg:last-child { transform: translateX(3px); opacity: 1; }
+
 /* ═══ Dashboard recomposition: hierarchy instead of four equal cards ═══ */
 .dash-hero {
   display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 26px;
