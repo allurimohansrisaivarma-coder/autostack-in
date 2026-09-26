@@ -155,29 +155,33 @@ recovery page) with light/dark/system theme. Anonymous visitors get a cinematic 
 page (scroll-expansion hero, container-scroll product reveal, bento capability grid,
 pipeline, trust chapter, structured footer) and a hero-split sign-in — authorization is
 unchanged and still enforced server-side.
-Sidebar groups, in navigation order:
 
-- **Main** (daily use) — `Dashboard` (live run/event/heartbeat status, honest "not
-  measured" metrics), `Discovery` (detected candidates from real repeated patterns,
-  evidence-only), `Create` (plan → generate → sandbox test → approve stepper,
-  backend-gated at each step), `Workflows` (list, runs, parameter schemas, delete),
-  `Notifications` (in-app feed with read/read-all).
+Navigation is a **floating top bar, not a sidebar**. On desktop it is a centered pill:
+logo · Product / Operate / Trust dropdowns (grouped panels with icons and
+ descriptions) · worker status dot · ⌘K search · notifications · account menu.
+At ≤860px the groups collapse into a hamburger that opens a grouped, accordion
+navigation sheet (with focus trap, Escape, backdrop); the top bar carries only
+burger · logo · account. Dropdowns close on outside click, Escape, and route change.
+In-page navigation groups:
+
+- **Product** (daily use) — `Dashboard` (live run/event/heartbeat status, honest "not
+  measured" metrics), `Workflows` (list, runs, parameter schemas, delete),
+  `Discovery` (detected candidates from real repeated patterns, evidence-only),
+  `Create` (plan → generate → sandbox test → approve stepper, backend-gated at each step).
 - **Operate** (workspace tooling) — `Scheduling` (per-workflow triggers with
   enable/disable and a manual **tick**), `Runners` (pairing/confirm/revoke lifecycle),
   `Connectors` (honest per-integration status).
 - **Trust** (governance) — `Registry` (versioned template publish/import/withdraw with
   consent + secret scan), `Trust Log` (hash-chained audit with chain verification and
   SIEM-style export), `Data & Privacy` (processing ledger, retention windows in whole
-  days, subject export).
+  days, subject export). Notifications live in the top-bar bell, not the nav.
 
-Personal and administrative screens live **outside** the nav: the account control at the
-sidebar's bottom opens a popover with **Account & tokens**, **Members & organization**
-(owner only), **Settings**, an **Appearance** switch, and **Sign out** — reachable on
-mobile too. `Settings` (`#/settings`, sub-links like `#/settings/security`) is a
-dedicated two-pane experience (General / Profile / Appearance / Security, plus
-**Organization** for owners: tier, retention, SSO, member links) with its own
-“← Back to application” navigation; the backend stays authoritative for every
-administrative action, and non-owners see read-only state plus the requirement.
+Personal and administrative screens live in the **account menu** (top right): Account
+& tokens, Members & organization (owner only), Settings, an Appearance switch, and
+Sign out. `Settings` (`#/settings`, sub-links like `#/settings/security`) is a
+dedicated context (General / Profile / Appearance / Security, plus **Organization**
+for owners: tier, retention, SSO, member links); the backend stays authoritative for
+every administrative action, and non-owners see read-only state plus the requirement.
 
 ### Design system
 

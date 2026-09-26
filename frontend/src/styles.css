@@ -115,8 +115,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* ─── Shell ─────────────────────────────────────────────────────────────────── */
 .shell {
-  display: grid;
-  grid-template-columns: 220px 1fr;
+  display: block;
   min-height: 100vh;
 }
 
@@ -286,7 +285,9 @@ body, .sidebar, .card, .main { transition: background 0.2s ease, color 0.2s ease
 ::selection { background: var(--accent-soft); color: var(--text); }
 
 /* ─── Main ───────────────────────────────────────────────────────────────────── */
-.main { overflow-y: auto; overflow-x: hidden; min-height: 100vh; }
+/* Floating-nav shell: content spans the full viewport width; the floating
+   nav floats above it. Top padding leaves breathing room under the pill. */
+.main { overflow-x: clip; min-height: 100vh; padding-top: 92px; }
 
 .screen { padding: 26px 32px 44px; margin: 0 auto; max-width: 1180px; width: 100%; }
 
@@ -901,15 +902,12 @@ body, .sidebar, .card, .main { transition: background 0.2s ease, color 0.2s ease
 }
 
 @media (max-width: 860px) {
-  .shell { grid-template-columns: 1fr; }
-  .sidebar { height: auto; position: static; flex-direction: row; flex-wrap: wrap; padding: 12px; }
-  .nav { flex-direction: row; }
-  /* Account control stays reachable on mobile (it carries Sign out + Settings). */
-  .sidebar-footer { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding-top: 0; }
-  .sidebar-footer .consent-badge { display: none; }
-  .account-pop { max-width: 250px; }
+  /* Mobile shell: the sidebar is gone; the floating nav collapses to a top
+     bar (burger + logo + account) and content spans the full width. */
+  .main { padding-top: 74px; }
+  /* fn-groups/burger hides live in styles-premium.css (cascade order matters) */
   .two-col { grid-template-columns: 1fr; }
-  .screen { padding: 16px; }
+  .screen { padding: 18px 16px 40px; }
   .form-grid { grid-template-columns: 1fr; }
   .publish-box { grid-template-columns: 1fr; }
   .publish-actions { flex-direction: column; }

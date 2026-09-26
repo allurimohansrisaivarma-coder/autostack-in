@@ -75,15 +75,34 @@ export function Dashboard({ setPage }) {
         </div>
       </div>
 
-      <div className="metric-row">
-        {metrics.map(m => (
-          <div className="metric-card" key={m.label}>
-            <div className="metric-label">{m.label}</div>
-            <div className="metric-value">{m.value}</div>
-            {m.bar && <div className="metric-bar"><div className="metric-bar-fill" style={{ width: `${successRate}%` }} /></div>}
-            <div className={`metric-sub ${m.color}`}>{m.sub}</div>
+      {/* 1. What is happening now — execution health leads the page. */}
+      <div className={`dash-hero ${connected ? '' : 'off'}`}>
+        <div className="dash-hero-main">
+          <div className="dash-hero-label">Execution health</div>
+          <div className="dash-hero-value">
+            {successRate === null ? '—' : `${successRate}%`}
+            <span className="dash-hero-sub">{connected ? `${passed} / ${runs.length} runs passed` : 'worker offline'}</span>
           </div>
-        ))}
+          {successRate !== null && (
+            <div className="metric-bar"><div className="metric-bar-fill" style={{ width: `${successRate}%` }} /></div>
+          )}
+        </div>
+        <div className="dash-hero-side">
+          <div className="dash-side-metric">
+            <div className="metric-label">Active automations</div>
+            <div className="metric-value">{connected ? workflows.length : '—'}</div>
+          </div>
+          <div className="dash-side-metric">
+            <div className="metric-label">Unread notifications</div>
+            <div className="metric-value">{connected ? unread : '—'}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. What should I do next — one honest opportunity line, demoted. */}
+      <div className="dash-note">
+        <Icon d={ICONS.chart} size={14} />
+        <span>Efficiency (hours saved) is not measured — it appears here only after a real time study.</span>
       </div>
 
       <div className="two-col">
@@ -101,7 +120,7 @@ export function Dashboard({ setPage }) {
           ) : (
             <table className="ops-table">
               <tbody>
-                {runs.slice(0, 8).map(r => (
+                {runs.slice(0, 6).map(r => (
                   <tr key={r.id}>
                     <td>
                       <div className={`op-icon ${r.status === 'passed' ? 'green' : r.status === 'running' ? 'blue' : 'red'}`}>
@@ -110,7 +129,7 @@ export function Dashboard({ setPage }) {
                     </td>
                     <td>
                       <div className="op-name">{r.workflow_id || 'run'}</div>
-                      <div className="op-sub">{r.trigger || 'manual'} · {r.measured_ms ? `${r.measured_ms} ms` : 'timing n/a'}</div>
+                      <div className="op-sub">{r.trigger || 'manual'}</div>
                     </td>
                     <td className="op-right">
                       <StatusBadge s={r.status === 'passed' ? 'Success' : r.status === 'running' ? 'In Progress' : r.status === 'cancelled' ? 'Rolled back' : 'Failed'} />
@@ -124,28 +143,22 @@ export function Dashboard({ setPage }) {
         </div>
 
         <div className="right-col">
-          <div className="card discovery-hint">
-            <div className="card-header">
-              <strong>Discovery Engine</strong>
-              <Icon d={ICONS.search} size={18} />
-            </div>
-            {cands.length > 0 ? (
-              <>
-                <p className="hint-sub">Evidence-based candidate detected (exact counts, no invented confidence).</p>
-                <div className="hint-box">
-                  <div className="hint-name">{(cands[0].pattern && cands[0].pattern.sequence || []).join(' → ')}</div>
-                  <div className="hint-detail">resource: {cands[0].pattern && cands[0].pattern.resource} · {cands[0].occurrences} completed instances</div>
-                </div>
-              </>
+          {/* 2. What needs attention — compact strip, prominent only when there is evidence. */}
+          <button className={`dash-discovery ${cands.length ? 'has-candidates' : ''}`} onClick={() => setPage('discovery')}>
+            <Icon d={ICONS.search} size={16} />
+            {cands.length ? (
+              <span className="dd-copy">
+                <strong>Discovery: new evidence-based candidate</strong>
+                <span>{(cands[0].pattern && cands[0].pattern.sequence || []).join(' → ')} · {cands[0].occurrences} instances</span>
+              </span>
             ) : (
-              <p className="hint-sub">{connected
-                ? 'No qualifying patterns yet — candidates appear only from real repeated work (≥3 instances across ≥2 clients).'
-                : 'Connect the worker to see real detected patterns.'}</p>
+              <span className="dd-copy">
+                <strong>Discovery engine</strong>
+                <span>{connected ? 'No qualifying patterns yet — they appear from real repeated work only.' : 'Connect the worker to see detected patterns.'}</span>
+              </span>
             )}
-            <button className="btn-primary" onClick={() => setPage('discovery')}>
-              <Icon d={ICONS.zap} size={16} /> Open Discovery
-            </button>
-          </div>
+            <Icon d={ICONS.chevron} size={15} />
+          </button>
 
           <div className="card">
             <div className="card-header"><strong>Quick Actions</strong></div>

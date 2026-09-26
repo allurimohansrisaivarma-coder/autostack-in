@@ -5,11 +5,10 @@ import './styles.css';
 import './styles-premium.css';
 import { subscribeLive, startLive } from './live.js';
 
-import { Icon, ICONS, StatusBadge, Terminal, stamp } from './main-shared.jsx';
-import { ThemeLogo } from './brand.jsx';
-import { PageTransition, SpringPopover } from './premium.jsx';
-import { ThemeSwitcher } from './premium.jsx';
+import { Icon, ICONS, StatusBadge } from './main-shared.jsx';
+import { PageTransition } from './premium.jsx';
 import { Landing, AuthScreen } from './landing.jsx';
+import { FloatingNav } from './nav.jsx';
 
 // ─── tiny icon set (inline SVG so no dependency issues) ───────────────────────
 // ─── data ─────────────────────────────────────────────────────────────────────
@@ -167,27 +166,6 @@ function Discovery({ setPage }) {
 // CreateAutomation now lives in its own module (real backend-gated stepper).
 import { CreateAutomation } from './create-automation.jsx';
 import { spring } from './motion.js';
-// ─── shell ────────────────────────────────────────────────────────────────────
-// Sidebar IA (Phases 4–5): three flat groups — Main / Operate / Trust. Personal
-// and management screens (Profile, Teams, Settings, theme) moved out of the
-// nav into the bottom account control + its popover, and into the dedicated
-// Settings experience. Teams stays reachable (account menu / Settings →
-// Organization & members); nothing is orphaned.
-const pages = [
-  { id:'dashboard',     label:'Dashboard',      icon: ICONS.grid,    group:'Main' },
-  { id:'discovery',     label:'Discovery',      icon: ICONS.zap,     group:'Main' },
-  { id:'create',        label:'Create',         icon: ICONS.plus,    group:'Main' },
-  { id:'workflows',     label:'Workflows',      icon: ICONS.flow,    group:'Main' },
-  { id:'notifications', label:'Notifications',  icon: ICONS.bell,    group:'Main' },
-
-  { id:'scheduling',  label:'Scheduling',       icon: ICONS.clock,   group:'Operate' },
-  { id:'runners',     label:'Runners',          icon: ICONS.cpu,     group:'Operate' },
-  { id:'connectors',  label:'Connectors',       icon: ICONS.package, group:'Operate' },
-
-  { id:'registry',    label:'Registry',         icon: ICONS.db,      group:'Trust' },
-  { id:'trustlog',    label:'Trust Log',        icon: ICONS.shield,  group:'Trust' },
-  { id:'privacy',     label:'Data & Privacy',   icon: ICONS.shield,  group:'Trust' },
-];
 
 // Unknown hashes must never dead-end: the router falls back to a real page
 // with a working path back into the app.
@@ -294,94 +272,11 @@ function App() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="brand" aria-label="AutoStack IN">
-          <ThemeLogo lockup={false} h={34} />
-        </div>
-
-        <nav className="nav">
-          {['Main', 'Operate', 'Trust'].map(group => (
-            <div key={group} className="nav-group">
-              <div className="nav-group-label">{group}</div>
-              {pages.filter(p => p.group === group).map(p => (
-                <button
-                  key={p.id}
-                  className={`nav-item ${page === p.id ? 'active' : ''}`}
-                  title={p.label === 'Create' ? 'Create automation' : undefined}
-                  onClick={() => setPage(p.id)}
-                >
-                  <Icon d={p.icon} size={18} />
-                  <span>{p.label}</span>
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="consent-badge" title={workerUp ? 'Worker on :8747 — live data' : 'Worker unreachable — demo data shown'}>
-            <Icon d={ICONS.lock} size={14} />
-            <span>{workerUp ? 'Worker: LIVE' : 'Worker: demo mode'}</span>
-          </div>
-          {/* Phase 6: one interactive account control opens the account popover
-              (Account / Members / Settings / Appearance / Sign out). Keyboard,
-              outside-click and Escape close live in SpringPopover. */}
-          {identity && identity.user ? (
-            <SpringPopover
-              className="account-pop"
-              align="left"
-              label={
-                <span className="sidebar-user account-btn">
-                  <span className="avatar">{identity.user.username.slice(0, 2).toUpperCase()}</span>
-                  <span className="sidebar-user-meta">
-                    <span className="user-name">{identity.user.display_name || identity.user.username}</span>
-                    <span className="user-role">{identity ? `${identity.capabilities.tier} · ${identity.role}` : ''}</span>
-                  </span>
-                  <Icon d={ICONS.chevron} size={14} />
-                </span>
-              }
-            >
-              {({ close }) => (
-                <div className="account-menu">
-                  <div className="account-menu-head">
-                    <span className="user-name">{identity.user.display_name || identity.user.username}</span>
-                    <span className="user-role">@{identity.user.username} · {identity.role} · {identity.capabilities.tier} tier</span>
-                  </div>
-                  <button className="account-item" onClick={() => { close(); setPage('profile'); }}>
-                    <Icon d={ICONS.user} size={16} /> Account &amp; tokens
-                  </button>
-                  {isOwner && (
-                    <button className="account-item" onClick={() => { close(); setPage('teams'); }}>
-                      <Icon d={ICONS.users} size={16} /> Members &amp; organization
-                    </button>
-                  )}
-                  <button className="account-item" onClick={() => { close(); setPage('settings'); }}>
-                    <Icon d={ICONS.cog} size={16} /> Settings
-                  </button>
-                  <div className="account-menu-sep" />
-                  <div className="account-theme">
-                    <span>Appearance</span>
-                    <ThemeSwitcher compact />
-                  </div>
-                  <div className="account-menu-sep" />
-                  <button className="account-item danger" onClick={() => { close(); doSignOut(); }}>
-                    <Icon d={ICONS.logout} size={16} /> Sign out
-                  </button>
-                </div>
-              )}
-            </SpringPopover>
-          ) : (
-            <div className="sidebar-user">
-              <div className="avatar">SV</div>
-              <div className="sidebar-user-meta">
-                <div className="user-name">Service token</div>
-                <div className="user-role">legacy mode</div>
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
-
+      <FloatingNav
+        page={page} setPage={setPage}
+        identity={identity} isOwner={isOwner}
+        live={live} onSignOut={doSignOut}
+      />
       <main className="main">
         <PageTransition pageKey={page}>
           {Screen}
