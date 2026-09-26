@@ -2,9 +2,12 @@
 // Rule: real worker data when connected (labeled), demo data only when offline,
 // honest empty states everywhere. No invented percentages, ratings, or savings.
 import React, { useEffect, useMemo, useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { api } from './api.js';
 import { subscribeLive } from './live.js';
 import { Icon, ICONS, StatusBadge } from './main-shared.jsx';
+import { Reveal } from './premium.jsx';
+import { LEVEL, spring, dur } from './motion.js';
 
 function timeShort(iso) {
   if (!iso) return '—';
@@ -59,8 +62,17 @@ export function Dashboard({ setPage }) {
   return (
     <div className="screen">
       <div className="screen-header">
-        <div><h2>Operations Dashboard</h2></div>
-        <button className="btn-icon" onClick={() => setPage('trustlog')}><Icon d={ICONS.bell} /></button>
+        <div>
+          <div className="breadcrumb">Workspace</div>
+          <h2>Dashboard</h2>
+          <p className="profile-sub">Live operations across your automations — every number comes from the worker, never sampled.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="btn-icon" title="Notifications" aria-label="Notifications" onClick={() => setPage('notifications')}><Icon d={ICONS.bell} /></button>
+          <button className="btn-primary" onClick={() => setPage('create')}>
+            <Icon d={ICONS.plus} size={16} /> Create automation
+          </button>
+        </div>
       </div>
 
       <div className="metric-row">
@@ -333,12 +345,25 @@ export function Workflows({ setPage }) {
             {nodes.length > 0 && (
               <div className="detail-section">
                 <div className="detail-label">Node records</div>
-                {nodes.map(n => (
-                  <div key={`${n.seq}-${n.node}`} className="approval-row">
-                    <span className="mono dim">#{n.seq} {n.node}</span>
-                    <span className={`badge ${n.status === 'passed' ? 'green' : 'red'}`}>{n.status}{n.ms ? ` ${n.ms}ms` : ''}</span>
-                  </div>
-                ))}
+                {nodes.map((n, i) => {
+                  // Execution status materials: pass / run / fail (pending → run).
+                  const cls = n.status === 'passed' ? 'pass'
+                    : (n.status === 'running' || n.status === 'pending') ? 'run' : 'fail';
+                  const badgeCls = cls === 'pass' ? 'green' : cls === 'run' ? 'blue' : 'red';
+                  return (
+                    <motion.div
+                      key={`${n.seq}-${n.node}-${i}`} className={`run-node ${cls}`}
+                      initial={LEVEL.interactive ? { opacity: 0, x: -10 } : false}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={spring.gentle}
+                    >
+                      <span className="rn-dot" />
+                      <span className="rn-name">#{n.seq} {n.node}</span>
+                      {n.ms ? <span className="rn-ms">{n.ms}ms</span> : null}
+                      <span className={`badge ${badgeCls}`}>{n.status}</span>
+                    </motion.div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -350,7 +375,8 @@ export function Workflows({ setPage }) {
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
-export function Registry() {
+export function Registry({ identity }) {
+  const isOwner = !!(identity && identity.role === 'owner');
   const [live, setLive] = useState(null);
   const [search, setSearch] = useState('');
   const [templates, setTemplates] = useState([]);
@@ -428,18 +454,21 @@ export function Registry() {
 
       <div className="card">
         <div className="card-header"><strong>Publish one of your workflows</strong></div>
-        <p className="profile-sub">Publication is a separate consent. The registry receives the validated graph and connectors — not your data.</p>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select value={publishWf} onChange={e => setPublishWf(e.target.value)} style={{ minWidth: 240 }}>
-            <option value="">Select workflow…</option>
-            {myWorkflows.map(w => <option key={w.id} value={w.id}>{w.name} (v{w.version})</option>)}
-          </select>
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />
-            I consent to publishing this schema
-          </label>
-          <button className="btn-dark" disabled={!connected} onClick={doPublish}>Publish</button>
-        </div>
+        <p className="profile-sub">Publication is a separate consent. The registry receives the validated graph and connectors — not your data. Publishing requires the owner role.</p>
+        {isOwner ? (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select value={publishWf} onChange={e => setPublishWf(e.target.value)} style={{ minWidth: 240 }}>
+              <option value="">Select workflow…</option>
+              {myWorkflows.map(w => <option key={w.id} value={w.id}>{w.name} (v{w.version})</option>)}
+            </select>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />
+              I consent to publishing this schema</label>
+            <button className="btn-dark" disabled={!connected} onClick={doPublish}>Publish</button>
+          </div>
+        ) : (
+          <p className="muted">Publishing templates requires the owner role — imports stay open to all writers and always arrive as untrusted drafts.</p>
+        )}
       </div>
 
       <div className="registry-grid" style={{ marginTop: 16 }}>

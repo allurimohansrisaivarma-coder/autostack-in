@@ -904,7 +904,10 @@ body, .sidebar, .card, .main { transition: background 0.2s ease, color 0.2s ease
   .shell { grid-template-columns: 1fr; }
   .sidebar { height: auto; position: static; flex-direction: row; flex-wrap: wrap; padding: 12px; }
   .nav { flex-direction: row; }
-  .sidebar-footer { display: none; }
+  /* Account control stays reachable on mobile (it carries Sign out + Settings). */
+  .sidebar-footer { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding-top: 0; }
+  .sidebar-footer .consent-badge { display: none; }
+  .account-pop { max-width: 250px; }
   .two-col { grid-template-columns: 1fr; }
   .screen { padding: 16px; }
   .form-grid { grid-template-columns: 1fr; }

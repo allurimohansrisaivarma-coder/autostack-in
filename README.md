@@ -150,14 +150,18 @@ engine per test (module), so the dev DB row counts are identical before and afte
 
 ## Using the app
 
-The UI is a hash-routed shell (`#/dashboard` is the default) with a dark/light/system
-theme switch in the sidebar. Sidebar groups, in navigation order:
+The UI is a hash-routed shell (`#/dashboard` is the default; unknown links render a
+recovery page) with light/dark/system theme. Anonymous visitors get a cinematic landing
+page (scroll-expansion hero, container-scroll product reveal, bento capability grid,
+pipeline, trust chapter, structured footer) and a hero-split sign-in — authorization is
+unchanged and still enforced server-side.
+Sidebar groups, in navigation order:
 
 - **Main** (daily use) — `Dashboard` (live run/event/heartbeat status, honest "not
-  measured" metrics), `Discovery` (detected candidates from real repeated patterns),
-  `Create Automation` (plan → generate → sandbox test → approve stepper, backend-gated
-  at each step), `Workflows` (list, runs, parameter schemas, delete), `Notifications`
-  (in-app feed with read/read-all).
+  measured" metrics), `Discovery` (detected candidates from real repeated patterns,
+  evidence-only), `Create` (plan → generate → sandbox test → approve stepper,
+  backend-gated at each step), `Workflows` (list, runs, parameter schemas, delete),
+  `Notifications` (in-app feed with read/read-all).
 - **Operate** (workspace tooling) — `Scheduling` (per-workflow triggers with
   enable/disable and a manual **tick**), `Runners` (pairing/confirm/revoke lifecycle),
   `Connectors` (honest per-integration status).
@@ -165,10 +169,25 @@ theme switch in the sidebar. Sidebar groups, in navigation order:
   consent + secret scan), `Trust Log` (hash-chained audit with chain verification and
   SIEM-style export), `Data & Privacy` (processing ledger, retention windows in whole
   days, subject export).
-- **Account** — `Profile` (`/auth/me`, API tokens with create/revoke), `Teams` (members,
-  invitations, role changes), `Settings` (tier + theme), `Home` (setup overview), and the
-  **sign-out** control in the sidebar's account block (clears the session token in this
-  browser).
+
+Personal and administrative screens live **outside** the nav: the account control at the
+sidebar's bottom opens a popover with **Account & tokens**, **Members & organization**
+(owner only), **Settings**, an **Appearance** switch, and **Sign out** — reachable on
+mobile too. `Settings` (`#/settings`, sub-links like `#/settings/security`) is a
+dedicated two-pane experience (General / Profile / Appearance / Security, plus
+**Organization** for owners: tier, retention, SSO, member links) with its own
+“← Back to application” navigation; the backend stays authoritative for every
+administrative action, and non-owners see read-only state plus the requirement.
+
+### Design system
+
+Frontend motion is centrally gated (`frontend/src/motion.js`): level 0 static
+(prefers-reduced-motion) → level 3 cinematic. Premium materials — glass navbar,
+spotlight cards, ambient hero fields — live in `frontend/src/styles-premium.css`
+with reusable primitives (`GlassSurface`, `PremiumCard`, `MagneticButton`,
+`Reveal`, `ScrollText`, `ContainerScroll`, `BentoGrid`, `SpringPopover`,
+`PageTransition`) in `frontend/src/premium.jsx`. The brand
+mark (`brand.jsx`) stays blue in light mode and glass-white in dark mode.
 
 ### Roles
 

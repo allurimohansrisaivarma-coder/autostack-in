@@ -4,13 +4,14 @@
 import { useState } from 'react';
 import { Icon, ICONS, Terminal, stamp, Card, Row, Gate } from './main-shared.jsx';
 import { api, setToken, getToken } from './api.js';
+import { MagneticButton } from './premium.jsx';
 
 // ── shared bits ───────────────────────────────────────────────────────────────
 
 // ── Login / Signup ────────────────────────────────────────────────────────────
 
-export function Login({ setPage, setIdentity }) {
-  const [mode, setMode] = useState('login');
+export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
+  const [mode, setMode] = useState(initialMode);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -30,7 +31,7 @@ export function Login({ setPage, setIdentity }) {
       setToken(issued.token);
       const me = await api.authMe();
       setIdentity(me);
-      setPage('home');
+      setPage('dashboard');
     } catch (err) {
       setMsg(err.message);
     } finally {
@@ -56,13 +57,20 @@ export function Login({ setPage, setIdentity }) {
                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={8} />
         </label>
         {msg && <div className="error" role="alert">{msg}</div>}
-        <button className="primary" type="submit" disabled={busy}>
+        <MagneticButton className="primary" type="submit" disabled={busy} style={{ width: '100%', padding: '11px 16px' }}>
           {busy ? (mode === 'login' ? 'Signing in…' : 'Creating account…')
                 : (mode === 'login' ? 'Sign in' : 'Create account')}
-        </button>
-        <button type="button" className="link" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
-          {mode === 'login' ? 'Need an account? Create one' : 'Have an account? Sign in'}
-        </button>
+        </MagneticButton>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button type="button" className="link" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
+            {mode === 'login' ? 'Need an account? Create one' : 'Have an account? Sign in'}
+          </button>
+          {onBack && (
+            <button type="button" className="link" onClick={onBack}>
+              ← Back
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );
@@ -239,7 +247,8 @@ export function Profile({ identity }) {
 
 const ROLES = ['observer', 'operator', 'approver', 'owner'];
 
-export function Teams() {
+export function Teams({ identity }) {
+  const isOwner = !!(identity && identity.role === 'owner');
   const [members, setMembers] = useState(null);
   const [invites, setInvites] = useState(null);
   const [processes, setProcesses] = useState(null);
@@ -269,25 +278,34 @@ export function Teams() {
           <Row key={m.membership_id}>
             <div>{m.display_name || m.username} <span className="muted">({m.username})</span></div>
             <div>
-              <select value={m.role} onChange={async e => { await api.teamSetRole(m.membership_id, e.target.value); refresh(); }}>
-                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
+              {isOwner ? (
+                <select value={m.role} onChange={async e => { await api.teamSetRole(m.membership_id, e.target.value); refresh(); }}>
+                  {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              ) : <span className="muted">{m.role}</span>}
             </div>
           </Row>
         ))}
         {members && members.members.length === 0 && <p className="muted">No members yet.</p>}
+        {!isOwner && <p className="muted">Changing roles requires the owner role.</p>}
       </Card>
 
       <Card title="Invite a teammate">
-        <div className="field"><input placeholder="username of a local account" value={username} onChange={e => setUsername(e.target.value)} /></div>
-        <button className="primary" onClick={async () => { await api.teamAddMember(username, 'operator'); setUsername(''); refresh(); }}>Add as operator</button>
-        <button className="link" onClick={async () => {
-          const out = await api.teamCreateInvitation('approver');
-          setInvite(out);
-          refresh();
-        }}>Create approver invitation</button>
-        {invite && (
-          <div className="token-reveal"><strong>Invitation token (share over a trusted channel):</strong><code>{invite.token}</code></div>
+        {isOwner ? (
+          <>
+            <div className="field"><input placeholder="username of a local account" value={username} onChange={e => setUsername(e.target.value)} /></div>
+            <button className="primary" onClick={async () => { await api.teamAddMember(username, 'operator'); setUsername(''); refresh(); }}>Add as operator</button>
+            <button className="link" onClick={async () => {
+              const out = await api.teamCreateInvitation('approver');
+              setInvite(out);
+              refresh();
+            }}>Create approver invitation</button>
+            {invite && (
+              <div className="token-reveal"><strong>Invitation token (share over a trusted channel):</strong><code>{invite.token}</code></div>
+            )}
+          </>
+        ) : (
+          <p className="muted">Inviting members requires the owner role.</p>
         )}
         {invites && invites.invitations.map(i => (
           <Row key={i.id}>
@@ -298,8 +316,13 @@ export function Teams() {
       </Card>
 
       <Card title="Business processes">
-        <div className="field"><input placeholder="new process name" value={procName} onChange={e => setProcName(e.target.value)} /></div>
-        <button className="primary" onClick={async () => { await api.createProcess(procName); setProcName(''); refresh(); }}>Create process</button>
+        {isOwner && (
+          <>
+            <div className="field"><input placeholder="new process name" value={procName} onChange={e => setProcName(e.target.value)} /></div>
+            <button className="primary" onClick={async () => { await api.createProcess(procName); setProcName(''); refresh(); }}>Create process</button>
+          </>
+        )}
+        {!isOwner && <p className="muted">Creating processes requires the owner role.</p>}
         {processes && processes.processes.map(p => (
           <Row key={p.id}><div>{p.name} <span className="muted">quota/day: {p.run_quota_per_day || 'unlimited'}</span></div></Row>
         ))}
@@ -310,7 +333,8 @@ export function Teams() {
 
 // ── Runners ───────────────────────────────────────────────────────────────────
 
-export function Runners() {
+export function Runners({ identity }) {
+  const isOwner = !!(identity && identity.role === 'owner');
   const [runners, setRunners] = useState(null);
   const [name, setName] = useState('');
   const [pairing, setPairing] = useState(null);
@@ -326,22 +350,28 @@ export function Runners() {
       </header>
       {err && <div className="error">{err}</div>}
       <Card title="Register a runner">
-        <div className="field"><input placeholder="runner name" value={name} onChange={e => setName(e.target.value)} /></div>
-        <button className="primary" onClick={async () => { await api.registerRunner(name || 'local-runner', 'local'); setName(''); refresh(); }}>Register local runner</button>
-        <button className="link" onClick={async () => {
-          try {
-            const r = await api.registerRunner(name || 'office-runner', 'paired');
-            const p = await api.pairRunner(r.runner_id);
-            setPairing(p);
-            refresh();
-          } catch (e) { setErr(e.message); }
-        }}>Register paired runner (team tier)</button>
-        {pairing && (
-          <div className="token-reveal">
-            <strong>Pairing code — enter on the runner host:</strong>
-            <code>{pairing.pairing_code}</code>
-            <div className="muted">fingerprint {pairing.fingerprint}</div>
-          </div>
+        {isOwner ? (
+          <>
+            <div className="field"><input placeholder="runner name" value={name} onChange={e => setName(e.target.value)} /></div>
+            <button className="primary" onClick={async () => { await api.registerRunner(name || 'local-runner', 'local'); setName(''); refresh(); }}>Register local runner</button>
+            <button className="link" onClick={async () => {
+              try {
+                const r = await api.registerRunner(name || 'office-runner', 'paired');
+                const p = await api.pairRunner(r.runner_id);
+                setPairing(p);
+                refresh();
+              } catch (e) { setErr(e.message); }
+            }}>Register paired runner (team tier)</button>
+            {pairing && (
+              <div className="token-reveal">
+                <strong>Pairing code — enter on the runner host:</strong>
+                <code>{pairing.pairing_code}</code>
+                <div className="muted">fingerprint {pairing.fingerprint}</div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="muted">Registering and pairing runners requires the owner role.</p>
         )}
       </Card>
       <Card title="Registered runners">
@@ -362,7 +392,8 @@ export function Runners() {
 
 // ── Scheduling (opt-in, evidence-gated) ───────────────────────────────────────
 
-export function Scheduling() {
+export function Scheduling({ identity }) {
+  const isOwner = !!(identity && identity.role === 'owner');
   const [wfs, setWfs] = useState(null);
   const [triggers, setTriggers] = useState(null);
   const [wid, setWid] = useState('');
@@ -384,33 +415,39 @@ export function Scheduling() {
       </header>
       {err && <div className="error">{err}</div>}
       <Card title="Create a schedule">
-        <div className="field">
-          <select value={wid} onChange={e => setWid(e.target.value)}>
-            <option value="">choose a workflow…</option>
-            {wfs && wfs.workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <input placeholder="observed dates (comma separated, e.g. 2026-09-01, 2026-09-08, 2026-09-15)"
-                 value={dates} onChange={e => setDates(e.target.value)} />
-        </div>
-        <label className="check">
-          <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
-          I confirm this recurrence from real usage (not a demo cycle)
-        </label>
-        <button className="primary" onClick={async () => {
-          setErr(null); setSecret(null);
-          try {
-            const config = {
-              observed_dates: dates.split(',').map(s => s.trim()).filter(Boolean),
-              user_confirmed: confirmed,
-            };
-            const t = await api.createTrigger(wid, 'schedule', config, confirmed ? 'user-confirmed recurrence' : 'observed dates');
-            setSecret(t.trigger_id);
-            refresh();
-          } catch (e) { setErr(e.message); }
-        }}>Create schedule</button>
-        <p className="muted">Schedules need 3+ distinct observed dates or explicit confirmation — enforced by the worker.</p>
+        {isOwner ? (
+          <>
+            <div className="field">
+              <select value={wid} onChange={e => setWid(e.target.value)}>
+                <option value="">choose a workflow…</option>
+                {wfs && wfs.workflows.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <input placeholder="observed dates (comma separated, e.g. 2026-09-01, 2026-09-08, 2026-09-15)"
+                     value={dates} onChange={e => setDates(e.target.value)} />
+            </div>
+            <label className="check">
+              <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
+              I confirm this recurrence from real usage (not a demo cycle)
+            </label>
+            <button className="primary" onClick={async () => {
+              setErr(null); setSecret(null);
+              try {
+                const config = {
+                  observed_dates: dates.split(',').map(s => s.trim()).filter(Boolean),
+                  user_confirmed: confirmed,
+                };
+                const t = await api.createTrigger(wid, 'schedule', config, confirmed ? 'user-confirmed recurrence' : 'observed dates');
+                setSecret(t.trigger_id);
+                refresh();
+              } catch (e) { setErr(e.message); }
+            }}>Create schedule</button>
+            <p className="muted">Schedules need 3+ distinct observed dates or explicit confirmation — enforced by the worker.</p>
+          </>
+        ) : (
+          <p className="muted">Creating schedules requires the owner role.</p>
+        )}
       </Card>
       <Card title="Triggers">
         {triggers && triggers.triggers.map(t => (

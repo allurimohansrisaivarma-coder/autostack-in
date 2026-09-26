@@ -30,6 +30,9 @@ export function subscribeLive(fn) {
 }
 
 async function pollOnce() {
+  // Anonymous visitors never poll: the console 401-loop is noise for signed-out
+  // users, and the data would be refused anyway. Signed-in state re-arms it.
+  try { if (!localStorage.getItem('autostack_token')) { state.data = { ...state.data, connected: false }; emit(); return; } } catch { /* storage unavailable */ }
   const next = { ...state.data };
   let connected = false;
   try {

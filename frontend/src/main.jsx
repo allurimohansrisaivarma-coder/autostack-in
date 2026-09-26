@@ -1,231 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import { motion, AnimatePresence } from 'motion/react';
 import './styles.css';
+import './styles-premium.css';
 import { subscribeLive, startLive } from './live.js';
 
 import { Icon, ICONS, StatusBadge, Terminal, stamp } from './main-shared.jsx';
+import { ThemeLogo } from './brand.jsx';
+import { PageTransition, SpringPopover } from './premium.jsx';
+import { ThemeSwitcher } from './premium.jsx';
+import { Landing, AuthScreen } from './landing.jsx';
 
 // ─── tiny icon set (inline SVG so no dependency issues) ───────────────────────
 // ─── data ─────────────────────────────────────────────────────────────────────
-const liveOps = [
-  { name:'Vendor Onboarding', sub:'Automated document verification', status:'Success', time:'Just now', icon:'check', dept:'Procurement' },
-  { name:'GST Verification', sub:'Batch processing 500 records', status:'In Progress', time:'45% complete', icon:'refresh', dept:'Finance' },
-  { name:'Payroll Data Extraction', sub:'HR Department', status:'Success', time:'2 mins ago', icon:'check', dept:'HR' },
-  { name:'API Gateway Sync', sub:'Timeout on external endpoint', status:'Failed', time:'15 mins ago', icon:'x', dept:'IT Ops' },
-  { name:'Customer KYC Followup', sub:'Missing docs flagged, reminders sent', status:'Success', time:'1 hr ago', icon:'check', dept:'Operations' },
-];
-
-const registryItems = [
-  {
-    id: 1, title:'GST Vendor Verification', sector:'MSME Finance', usedBy:218, rating:'4.9',
-    tags:['Finance','Compliance','Vendor'],
-    desc:'Validates GSTIN against government portal, flags mismatches, generates approval note and updates ERP.',
-    steps:['Extract GSTIN from vendor docs','Validate on GST portal API','Flag mismatches automatically','Generate approval note','Log to ERP and audit trail'],
-    saves:'96 hrs/month', orgs:'218 offices across 8 states'
-  },
-  {
-    id: 2, title:'Invoice Approval Routing', sector:'Manufacturing', usedBy:164, rating:'4.8',
-    tags:['Finance','Approvals','ERP'],
-    desc:'Reads invoice metadata, matches against PO, routes to correct approver based on amount bracket, logs payment status.',
-    steps:['Read invoice metadata','Match PO value and vendor','Route to approver tier','Send approval notification','Log payment status in system'],
-    saves:'84 hrs/month', orgs:'164 manufacturing units'
-  },
-  {
-    id: 3, title:'HR Joining Document Pack', sector:'Services / IT', usedBy:132, rating:'4.7',
-    tags:['HR','Onboarding','Compliance'],
-    desc:'Collects offer letter, ID proofs, PF/ESIC fields, creates employee profile, sends welcome kit and task list.',
-    steps:['Collect joining documents','Check for missing proofs','Create employee profile','File PF/ESIC fields','Send joining kit and calendar invite'],
-    saves:'74 hrs/month', orgs:'132 service companies'
-  },
-  {
-    id: 4, title:'Monthly TDS Filing Pack', sector:'Finance / CA Offices', usedBy:98, rating:'4.6',
-    tags:['Tax','Compliance','Filing'],
-    desc:'Collects challans, reconciles deductions across departments, prepares TDS summary, routes for CA approval.',
-    steps:['Collect challan details','Reconcile deductions department-wise','Prepare TDS summary sheet','Route to CA for approval','File and archive'],
-    saves:'120 hrs/month', orgs:'98 finance offices'
-  },
-  {
-    id: 5, title:'Customer KYC Followup', sector:'BFSI / Operations', usedBy:87, rating:'4.5',
-    tags:['KYC','Customer','Compliance'],
-    desc:'Detects missing documents, triggers reminder emails, updates CRM ticket status, maintains audit trail.',
-    steps:['Detect missing documents in CRM','Send reminder email from template','Update ticket status','Escalate after 72hrs if unresolved','Log to audit trail'],
-    saves:'58 hrs/month', orgs:'87 BFSI branches'
-  },
-  {
-    id: 6, title:'Procurement Approval Chain', sector:'Government / PSU', usedBy:74, rating:'4.5',
-    tags:['Procurement','Approvals','Government'],
-    desc:'Routes purchase requests through approval hierarchy, checks budget availability, generates purchase order draft.',
-    steps:['Read purchase request','Check budget availability','Route through approval hierarchy','Generate PO draft','Send for final sign-off'],
-    saves:'110 hrs/month', orgs:'74 government departments'
-  },
-];
-
-const operatorProfile = {
-  user: 'Admin User',
-  team: 'Finance',
-  secondaryTeams: ['Operations'],
-  preferredTags: ['Finance', 'Compliance', 'Tax', 'Approvals', 'ERP'],
-  tools: ['Finance portal', 'ERP', 'Email', 'Document folder'],
-};
-
-const discoveredCandidates = [
-  {
-    id:1, name:'Monthly TDS Filing Pack', dept:'Finance Dept.', freq:'~40 times/month',
-    surfaces:['Finance portal','Email','Document folder'],
-    avgTime:'22 min per run', saving:'Est. 120 hrs/month saveable',
-    confidence:91, status:'Ready to draft',
-    steps:['Download challan from portal','Open Excel and paste values','Send approval email to CA','Archive in shared folder'],
-  },
-  {
-    id:2, name:'Weekly MIS Report', dept:'Operations', freq:'~4 times/month',
-    surfaces:['ERP','Excel','Email'],
-    avgTime:'3.5 hrs per run', saving:'Est. 56 hrs/month saveable',
-    confidence:84, status:'Ready to draft',
-    steps:['Pull data from ERP','Consolidate in Excel','Format report tables','Email to management'],
-  },
-  {
-    id:3, name:'Vendor Document Collection', dept:'Procurement', freq:'~18 times/month',
-    surfaces:['Email','Shared drive','ERP'],
-    avgTime:'45 min per run', saving:'Est. 40 hrs/month saveable',
-    confidence:78, status:'Needs review',
-    steps:['Email vendor for documents','Download attachments','Rename and file to folder','Update vendor status in ERP'],
-  },
-];
-
-const workflowsData = [
-  { id:1, name:'GST Vendor Verification', status:'Verified', team:'Procurement', saves:'96 hrs/mo', scripts:3, lastRun:'2 hrs ago', sandboxPass:true, approved:true },
-  { id:2, name:'Monthly TDS Filing Pack', status:'Drafting', team:'Finance', saves:'120 hrs/mo', scripts:1, lastRun:'Pending', sandboxPass:false, approved:false },
-  { id:3, name:'Employee Joining Compliance', status:'Verified', team:'HR', saves:'74 hrs/mo', scripts:2, lastRun:'1 day ago', sandboxPass:true, approved:true },
-  { id:4, name:'Customer KYC Followup', status:'Needs Review', team:'Operations', saves:'58 hrs/mo', scripts:1, lastRun:'3 hrs ago', sandboxPass:false, approved:false },
-  { id:5, name:'Invoice Approval Routing', status:'Verified', team:'Finance', saves:'84 hrs/mo', scripts:2, lastRun:'30 mins ago', sandboxPass:true, approved:true },
-  { id:6, name:'Procurement Approval Chain', status:'Verified', team:'Procurement', saves:'110 hrs/mo', scripts:4, lastRun:'5 hrs ago', sandboxPass:true, approved:true },
-];
-
-const trustLog = [
-  { id:'TXN-0041', action:'Workflow published to registry', workflow:'GST Vendor Verification', user:'Admin', time:'Today 14:23', hash:'a9f3...d72c', result:'Pass' },
-  { id:'TXN-0040', action:'Sandbox test — deliberate column mismatch caught', workflow:'Monthly TDS Filing Pack', user:'System', time:'Today 13:58', hash:'3b1e...f09a', result:'Blocked' },
-  { id:'TXN-0039', action:'Script approved by user', workflow:'Invoice Approval Routing', user:'Priya S.', time:'Today 12:11', hash:'7c4a...b31f', result:'Pass' },
-  { id:'TXN-0038', action:'Workflow pulled from registry', workflow:'HR Joining Document Pack', user:'Ratan M.', time:'Today 11:44', hash:'d6e2...219b', result:'Pass' },
-  { id:'TXN-0037', action:'Sandbox test passed', workflow:'GST Vendor Verification', user:'System', time:'Today 10:30', hash:'1fa8...c47d', result:'Pass' },
-  { id:'TXN-0036', action:'New pattern detected', workflow:'Customer KYC Followup', user:'Discovery Engine', time:'Yesterday 17:02', hash:'9b3c...e81a', result:'Flagged' },
-  { id:'TXN-0035', action:'Script rollback triggered', workflow:'Payroll Data Extraction', user:'Ankit R.', time:'Yesterday 15:17', hash:'2d7f...a03c', result:'Rolled back' },
-  { id:'TXN-0034', action:'Workflow contributed to registry', workflow:'Procurement Approval Chain', user:'Admin', time:'Yesterday 09:55', hash:'f4b1...7e2d', result:'Pass' },
-];
-
-const MONITOR_POOL = [
-  { kind: 'cmd',  text: 'evt  browser.nav       https://services.gst.gov.in/services/searchtp' },
-  { kind: 'dim',  text: '     dom.click         #gstin-input  value_len=15  redacted=true' },
-  { kind: 'cmd',  text: 'evt  browser.submit    form#gst-lookup  fields=3  xhr=1' },
-  { kind: 'info', text: '     http  GET /api/searchtp  200  312ms  bytes=4.1k' },
-  { kind: 'cmd',  text: 'evt  file.save         vendor_master.xlsx  sheet=Q3  +12 rows' },
-  { kind: 'dim',  text: '     openpyxl.diff     col[GSTIN] unchanged  col[STATUS] 12 writes' },
-  { kind: 'cmd',  text: 'evt  email.send        to=ca@***  subj="TDS pack"  attach=1' },
-  { kind: 'info', text: '     gmail.api         messages.send  id=18f2c…  latency=640ms' },
-  { kind: 'cmd',  text: 'evt  browser.download  challan_jul.csv  18.4kb  sha=b31c…' },
-  { kind: 'cmd',  text: 'evt  file.open         challan_jul.csv → excel  pid=8821' },
-  { kind: 'dim',  text: '     clipboard         copy  range=A1:F84  (schema only, values hashed)' },
-  { kind: 'cmd',  text: 'evt  file.save         tds_summary.xlsx  sheet=Jul  +1 tab' },
-  { kind: 'cmd',  text: 'evt  email.draft       to=ca@***  subj="TDS pack — Jul"  wait_send=true' },
-  { kind: 'info', text: 'pattern.seq           hash=7f3a91  prefix=download→xlsx→email  n=3' },
-  { kind: 'cmd',  text: 'evt  browser.nav       https://eportal.incometax.gov.in/iec/foservices' },
-  { kind: 'dim',  text: '     form.fill         #assessmentYear=2025-26  #formType=24Q' },
-  { kind: 'cmd',  text: 'evt  file.save         24Q_annexure.xlsx  cells=412  dirty=true' },
-  { kind: 'info', text: 'pattern.cluster       C-12  size=9  jaccard=0.81  window=47m' },
-  { kind: 'cmd',  text: 'evt  browser.nav       erp.internal/po/approve  ticket=PO-4419' },
-  { kind: 'dim',  text: '     table.row         vendor=***  amount_band=50k-2L  approver=L2' },
-  { kind: 'cmd',  text: 'evt  email.send        to=cfo@***  subj="PO-4419 pending"' },
-  { kind: 'info', text: 'pattern.cluster       C-19  size=6  jaccard=0.74  window=2h' },
-  { kind: 'cmd',  text: 'evt  file.save         kyc_gap_list.csv  +7 rows  missing=PAN,addr' },
-  { kind: 'cmd',  text: 'evt  email.send        template=kyc_nudge_v2  n=7  queued=true' },
-  { kind: 'dim',  text: '     crm.patch         ticket.KYC-1104  status=FOLLOWUP' },
-  { kind: 'info', text: 'detector.score        C-12  conf=0.73  repeats=11  est_min=22' },
-];
-
-const SANDBOX_SCRIPT = [
-  { delay: 280, kind: 'cmd',  text: '$ autostack sandbox run --job tds-filing-v3 --isolate docker --seed 8841' },
-  { delay: 420, kind: 'info', text: 'runtime   image=autostack/runner:1.4.2  sha256:9c1e8a…  cpu=2  mem=512m' },
-  { delay: 260, kind: 'dim',  text: 'mount     /fixtures/tds_jul.csv → /work/in  ro' },
-  { delay: 220, kind: 'dim',  text: 'mount     /generated/workflow.py → /work/job  rw' },
-  { delay: 300, kind: 'info', text: 'policy    no_network=true  no_host_fs=true  timeout=90s  pii_redact=strict' },
-  { delay: 180, kind: 'dim',  text: '' },
-  { delay: 380, kind: 'cmd',  test: 'ast_compile', text: '[ 1/12] pytest  test_ast_compile.py::test_module_parses' },
-  { delay: 520, kind: 'ok',   test: 'ast_compile', text: '         PASS  42 stmts  0 syntax errors  184ms' },
-  { delay: 340, kind: 'cmd',  test: 'secret_scan', text: '[ 2/12] bandit + trufflehog  test_secret_scan.py' },
-  { delay: 480, kind: 'dim',  text: '         scanned 1,204 tokens  entropy_threshold=4.5' },
-  { delay: 360, kind: 'ok',   test: 'secret_scan', text: '         PASS  0 secrets  0 high-severity  211ms' },
-  { delay: 320, kind: 'cmd',  test: 'schema_bind', text: '[ 3/12] test_schema_bind.py::test_columns_resolve' },
-  { delay: 440, kind: 'dim',  text: '         expected [GSTIN, PAN, AMOUNT, PERIOD]  found 4/4' },
-  { delay: 300, kind: 'ok',   test: 'schema_bind', text: '         PASS  bindings stable  96ms' },
-  { delay: 360, kind: 'cmd',  test: 'golden_path', text: '[ 4/12] test_replay_golden.py::test_end_to_end_jul' },
-  { delay: 700, kind: 'dim',  text: '         replay  84 rows  3 hops  browser→xlsx→email' },
-  { delay: 420, kind: 'ok',   test: 'golden_path', text: '         PASS  output hash=e91c… matches fixture  1.12s' },
-  { delay: 300, kind: 'cmd',  test: 'header_drift', text: '[ 5/12] test_header_drift.py::test_rename_gstin_column' },
-  { delay: 520, kind: 'warn', text: '         INJECT  col "GSTIN" → "GST_NO"  (deliberate mutation)' },
-  { delay: 480, kind: 'fail', text: '         FAIL  KeyError: GSTIN  at transform.py:88' },
-  { delay: 360, kind: 'info', text: '         gate    delivery BLOCKED  reason=sandbox_mismatch' },
-  { delay: 420, kind: 'ok',   test: 'header_drift', text: '         PASS  drift guard caught mutation  rollback=ok  640ms' },
-  { delay: 300, kind: 'cmd',  test: 'gstin_check', text: '[ 6/12] test_gstin_checksum.py::test_mod97' },
-  { delay: 440, kind: 'ok',   test: 'gstin_check', text: '         PASS  500 ids  0 false-accept  77ms' },
-  { delay: 280, kind: 'cmd',  test: 'idempotent', text: '[ 7/12] test_idempotency.py::test_rerun_same_input' },
-  { delay: 560, kind: 'ok',   test: 'idempotent', text: '         PASS  2nd run 0 extra emails  0 extra writes  403ms' },
-  { delay: 280, kind: 'cmd',  test: 'pii_redact', text: '[ 8/12] test_pii_redaction.py::test_no_raw_values_in_logs' },
-  { delay: 500, kind: 'ok',   test: 'pii_redact', text: '         PASS  0 PAN/GSTIN leaks in stdout+audit  158ms' },
-  { delay: 280, kind: 'cmd',  test: 'timeouts', text: '[ 9/12] test_timeout_bounds.py::test_step_sla' },
-  { delay: 420, kind: 'ok',   test: 'timeouts', text: '         PASS  each hop < 8s  overall 11.4s / 90s  88ms' },
-  { delay: 280, kind: 'cmd',  test: 'hash_chain', text: '[10/12] test_audit_hash_chain.py::test_append_only' },
-  { delay: 460, kind: 'ok',   test: 'hash_chain', text: '         PASS  prev_hash linked  sha256 ok  71ms' },
-  { delay: 280, kind: 'cmd',  test: 'rollback', text: '[11/12] test_rollback_hook.py::test_one_click_revert' },
-  { delay: 520, kind: 'ok',   test: 'rollback', text: '         PASS  snapshot restored  files=2  294ms' },
-  { delay: 280, kind: 'cmd',  test: 'perm_scope', text: '[12/12] test_permission_scope.py::test_surfaces_only' },
-  { delay: 480, kind: 'ok',   test: 'perm_scope', text: '         PASS  no desktop-wide hooks  allowlist=browser,xlsx,email' },
-  { delay: 360, kind: 'dim',  text: '' },
-  { delay: 240, kind: 'info', text: '────────  12 passed  1 injected-fail caught  0 delivered-on-fail  ────────' },
-  { delay: 200, kind: 'ok',   text: 'sandbox   GATE OPEN  artifact=tds-filing-v3.job  sig=ed25519:4ab2…' },
-];
-
-const SANDBOX_TESTS = [
-  { id: 'ast_compile', label: 'AST compile / syntax' },
-  { id: 'secret_scan', label: 'Secret + malware scan' },
-  { id: 'schema_bind', label: 'Schema binding' },
-  { id: 'golden_path', label: 'Golden-path replay' },
-  { id: 'header_drift', label: 'Header-drift injection' },
-  { id: 'gstin_check', label: 'GSTIN checksum' },
-  { id: 'idempotent', label: 'Idempotent re-run' },
-  { id: 'pii_redact', label: 'PII redaction' },
-  { id: 'timeouts', label: 'Timeout / SLA bounds' },
-  { id: 'hash_chain', label: 'Audit hash-chain' },
-  { id: 'rollback', label: 'Rollback hook' },
-  { id: 'perm_scope', label: 'Permission scope' },
-];
-
-function getSuitability(item) {
-  const title = `${item.title} ${item.sector}`.toLowerCase();
-  let score = 50;
-
-  const tagMatches = item.tags.filter((tag) => operatorProfile.preferredTags.includes(tag)).length;
-  score += tagMatches * 10;
-
-  if (title.includes(operatorProfile.team.toLowerCase())) score += 12;
-  if (item.tags.includes('Compliance')) score += 8;
-  if (item.tags.includes('ERP')) score += 6;
-
-  score = Math.max(55, Math.min(score, 98));
-
-  const reasons = [];
-  if (tagMatches > 0) reasons.push(`${tagMatches} tag match${tagMatches > 1 ? 'es' : ''}`);
-  if (item.tags.includes('Compliance')) reasons.push('compliance workflow');
-  if (item.tags.includes('ERP')) reasons.push('ERP-aligned');
-  if (title.includes('finance')) reasons.push('finance use-case');
-
-  return { score, reasons };
-}
-
 // ─── screens ──────────────────────────────────────────────────────────────────
 // Dashboard/Workflows/Registry/TrustLog are live modules (Phase 10).
 import { Dashboard, Workflows, Registry, TrustLog } from './screens-live.jsx';
 import { NotificationCenter, DataPrivacy, Connectors } from './roadmap-complete.jsx';
 import { api, setToken } from './api.js';
-import { Login, Home, Settings, Profile, Teams, Runners, Scheduling } from './roadmap-pages.jsx';
+import { Login, Profile, Teams, Runners, Scheduling } from './roadmap-pages.jsx';
+import { Settings } from './settings.jsx';
 
 function Discovery({ setPage }) {
   const [selected, setSelected] = useState(null);
@@ -250,7 +44,7 @@ function Discovery({ setPage }) {
       steps: (c.evidence && c.evidence.steps) || [],
       real: true,
     }));
-  const shown = [...realCandidates, ...discoveredCandidates];
+  const shown = realCandidates;
   const [dismissedIds, setDismissedIds] = useState([]);
   const [dismissErr, setDismissErr] = useState(null);
   const dismissReal = async (realId) => {
@@ -276,6 +70,11 @@ function Discovery({ setPage }) {
       <div className="two-col" style={{ alignItems: 'flex-start' }}>
         <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
           {dismissErr && <div className="info-banner"><span>Dismiss refused: {dismissErr}</span></div>}
+          {shown.filter(c => !dismissedIds.includes(c.id)).length === 0 && (
+            <div className="card empty-state" style={{ padding: 24 }}>
+              <p>No qualifying patterns yet — candidates appear only from real repeated work (≥3 instances across ≥2 clients).</p>
+            </div>
+          )}
           {shown.filter(c => !dismissedIds.includes(c.id)).map(c => (
             <div
               key={c.id}
@@ -367,59 +166,56 @@ function Discovery({ setPage }) {
 
 // CreateAutomation now lives in its own module (real backend-gated stepper).
 import { CreateAutomation } from './create-automation.jsx';
-import { getTheme, setTheme } from './theme.js';
-
-function ThemeSwitcher() {
-  const [theme, setThemeState] = useState(getTheme());
-  const options = [
-    { id: 'light', label: 'Light' },
-    { id: 'dark', label: 'Dark' },
-    { id: 'system', label: 'System' },
-  ];
-  return (
-    <div className="theme-switch" role="group" aria-label="Color theme">
-      {options.map(o => (
-        <button
-          key={o.id}
-          className={`theme-opt ${theme === o.id ? 'on' : ''}`}
-          aria-pressed={theme === o.id}
-          title={`${o.label} theme`}
-          onClick={() => { setTheme(o.id); setThemeState(o.id); }}
-        >{o.label}</button>
-      ))}
-    </div>
-  );
-}// ─── shell ────────────────────────────────────────────────────────────────────
-// Sidebar information architecture: MAIN (daily use) → OPERATE (workspace
-// tooling) → TRUST (governance) → ACCOUNT (user). Labels match the group
-// headers rendered in the nav; nothing was removed, only regrouped + ordered.
+import { spring } from './motion.js';
+// ─── shell ────────────────────────────────────────────────────────────────────
+// Sidebar IA (Phases 4–5): three flat groups — Main / Operate / Trust. Personal
+// and management screens (Profile, Teams, Settings, theme) moved out of the
+// nav into the bottom account control + its popover, and into the dedicated
+// Settings experience. Teams stays reachable (account menu / Settings →
+// Organization & members); nothing is orphaned.
 const pages = [
-  { id:'dashboard',   label:'Dashboard',         icon: ICONS.grid,    group:'Main' },
-  { id:'discovery',   label:'Discovery',         icon: ICONS.zap,     group:'Main' },
-  { id:'create',      label:'Create Automation', icon: ICONS.plus,    group:'Main' },
-  { id:'workflows',   label:'Workflows',         icon: ICONS.flow,    group:'Main' },
+  { id:'dashboard',     label:'Dashboard',      icon: ICONS.grid,    group:'Main' },
+  { id:'discovery',     label:'Discovery',      icon: ICONS.zap,     group:'Main' },
+  { id:'create',        label:'Create',         icon: ICONS.plus,    group:'Main' },
+  { id:'workflows',     label:'Workflows',      icon: ICONS.flow,    group:'Main' },
   { id:'notifications', label:'Notifications',  icon: ICONS.bell,    group:'Main' },
 
-  { id:'scheduling',  label:'Scheduling',        icon: ICONS.clock,   group:'Operate' },
-  { id:'runners',     label:'Runners',           icon: ICONS.cpu,     group:'Operate' },
-  { id:'connectors',  label:'Connectors',        icon: ICONS.package, group:'Operate' },
+  { id:'scheduling',  label:'Scheduling',       icon: ICONS.clock,   group:'Operate' },
+  { id:'runners',     label:'Runners',          icon: ICONS.cpu,     group:'Operate' },
+  { id:'connectors',  label:'Connectors',       icon: ICONS.package, group:'Operate' },
 
-  { id:'registry',    label:'Registry',          icon: ICONS.db,      group:'Trust' },
-  { id:'trustlog',    label:'Trust Log',         icon: ICONS.shield,  group:'Trust' },
-  { id:'privacy',     label:'Data & Privacy',    icon: ICONS.shield,  group:'Trust' },
-
-  { id:'profile',     label:'Profile',           icon: ICONS.user,    group:'Account' },
-  { id:'teams',       label:'Teams',             icon: ICONS.users,   group:'Account' },
-  { id:'settings',    label:'Settings',          icon: ICONS.cog,     group:'Account' },
-  { id:'home',        label:'Home',              icon: ICONS.grid,    group:'Account' },
+  { id:'registry',    label:'Registry',         icon: ICONS.db,      group:'Trust' },
+  { id:'trustlog',    label:'Trust Log',        icon: ICONS.shield,  group:'Trust' },
+  { id:'privacy',     label:'Data & Privacy',   icon: ICONS.shield,  group:'Trust' },
 ];
+
+// Unknown hashes must never dead-end: the router falls back to a real page
+// with a working path back into the app.
+function NotFound({ setPage }) {
+  return (
+    <div className="screen">
+      <header className="screen-head">
+        <div>
+          <h1>Page not found</h1>
+          <p className="muted">That link doesn't match any page in this workspace.</p>
+        </div>
+      </header>
+      <div><button className="btn" onClick={() => setPage('dashboard')}>Go to Dashboard</button></div>
+    </div>
+  );
+}
 
 function App() {
   // Hash router: the URL is the source of truth, so deep links (#/page) survive
-  // reloads and every navigation writes a shareable hash.
+  // reloads and every navigation writes a shareable hash. Unknown hashes render
+  // NotFound (never a blank screen).
   const pageForHash = () => {
     const h = (window.location.hash || '').replace(/^#/, '');
-    return h || 'dashboard';
+    if (!h) return 'dashboard';
+    // Settings owns its sub-path (#/settings/<section>); the app router only
+    // needs to know the context is "settings".
+    if (h.startsWith('settings')) return 'settings';
+    return h;
   };
   const [page, setPageState] = useState(pageForHash);
   const setPage = (p) => {
@@ -434,6 +230,7 @@ function App() {
   const [live, setLive] = useState(null);
   const [identity, setIdentity] = useState(null);
   const [authState, setAuthState] = useState('checking'); // checking|anon|ok
+  const [authMode, setAuthMode] = useState(null); // null → landing; 'login'|'signup' → auth hero
   useEffect(() => {
     const unsubscribe = subscribeLive(setLive);
     startLive(4000);
@@ -446,51 +243,77 @@ function App() {
     return <div className="login-wrap"><div className="muted">Connecting to worker…</div></div>;
   }
   if (authState === 'anon') {
-    return <Login setPage={setPage} setIdentity={(me) => { setIdentity(me); setAuthState('ok'); }} />;
+    // Cinematic landing is the entry surface; the auth card appears as a
+    // hero-split screen (AuthScreen) so context is never lost.
+    if (!authMode) {
+      return <Landing
+        workerUp={workerUp}
+        onSignUp={() => setAuthMode('signup')}
+        onSignIn={() => setAuthMode('login')}
+      />;
+    }
+    return (
+      <AuthScreen>
+        <Login
+          setPage={setPage}
+          initialMode={authMode}
+          onBack={() => setAuthMode(null)}
+          setIdentity={(me) => { setIdentity(me); setAuthState('ok'); }}
+        />
+      </AuthScreen>
+    );
   }
-  const Screen = {
-    home: <Home setPage={setPage} identity={identity} />,
-    settings: <Settings identity={identity} />,
+  // BUGFIX (Phase 2 audit): Dashboard/Discovery/Workflows/Create render real
+  // navigation buttons that call setPage — they must receive it, or every one
+  // of those buttons throws "setPage is not a function" on click.
+  const screenMap = {
+    settings: <Settings identity={identity} onExit={() => setPage('dashboard')} setPage={setPage} />,
     profile: <Profile identity={identity} />,
-    teams: <Teams />,
-    runners: <Runners />,
-    scheduling: <Scheduling />,
+    teams: <Teams identity={identity} />,
+    runners: <Runners identity={identity} />,
+    scheduling: <Scheduling identity={identity} />,
     notifications: <NotificationCenter />,
     privacy: <DataPrivacy />,
     connectors: <Connectors />,
-    dashboard: <Dashboard />,
-    discovery: <Discovery />,
-    registry: <Registry />,
-    workflows: <Workflows />,
-    create: <CreateAutomation />,
+    dashboard: <Dashboard setPage={setPage} />,
+    discovery: <Discovery setPage={setPage} />,
+    registry: <Registry identity={identity} />,
+    workflows: <Workflows setPage={setPage} />,
+    create: <CreateAutomation setPage={setPage} />,
     trustlog: <TrustLog />,
-  }[page];
+  };
+  const Screen = screenMap[page] || <NotFound setPage={setPage} />;
+
+  const doSignOut = async () => {
+    setToken('');
+    setIdentity(null);
+    setAuthState('anon');
+    setPage('dashboard');
+  };
+  const isOwner = !!(identity && identity.role === 'owner');
 
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-icon"><Icon d={ICONS.hash} size={20} /></div>
-          <div className="brand-text">
-            <div className="brand-name">AutoStack IN</div>
-          </div>
+        <div className="brand" aria-label="AutoStack IN">
+          <ThemeLogo lockup={false} h={34} />
         </div>
 
         <nav className="nav">
-          {['Main', 'Operate', 'Trust', 'Account'].map(group => (
+          {['Main', 'Operate', 'Trust'].map(group => (
             <div key={group} className="nav-group">
               <div className="nav-group-label">{group}</div>
               {pages.filter(p => p.group === group).map(p => (
                 <button
                   key={p.id}
                   className={`nav-item ${page === p.id ? 'active' : ''}`}
+                  title={p.label === 'Create' ? 'Create automation' : undefined}
                   onClick={() => setPage(p.id)}
                 >
                   <Icon d={p.icon} size={18} />
                   <span>{p.label}</span>
                 </button>
               ))}
-              {group === 'Account' && <ThemeSwitcher />}
             </div>
           ))}
         </nav>
@@ -500,33 +323,69 @@ function App() {
             <Icon d={ICONS.lock} size={14} />
             <span>{workerUp ? 'Worker: LIVE' : 'Worker: demo mode'}</span>
           </div>
-          <div className="sidebar-user">
-            <div className="avatar">{identity && identity.user ? identity.user.username.slice(0, 2).toUpperCase() : 'SV'}</div>
-            <div className="sidebar-user-meta">
-              <div className="user-name">{identity && identity.user ? identity.user.display_name || identity.user.username : 'Service token'}</div>
-              <div className="user-role">{identity ? `${identity.capabilities.tier} · ${identity.role}` : 'legacy mode'}</div>
+          {/* Phase 6: one interactive account control opens the account popover
+              (Account / Members / Settings / Appearance / Sign out). Keyboard,
+              outside-click and Escape close live in SpringPopover. */}
+          {identity && identity.user ? (
+            <SpringPopover
+              className="account-pop"
+              align="left"
+              label={
+                <span className="sidebar-user account-btn">
+                  <span className="avatar">{identity.user.username.slice(0, 2).toUpperCase()}</span>
+                  <span className="sidebar-user-meta">
+                    <span className="user-name">{identity.user.display_name || identity.user.username}</span>
+                    <span className="user-role">{identity ? `${identity.capabilities.tier} · ${identity.role}` : ''}</span>
+                  </span>
+                  <Icon d={ICONS.chevron} size={14} />
+                </span>
+              }
+            >
+              {({ close }) => (
+                <div className="account-menu">
+                  <div className="account-menu-head">
+                    <span className="user-name">{identity.user.display_name || identity.user.username}</span>
+                    <span className="user-role">@{identity.user.username} · {identity.role} · {identity.capabilities.tier} tier</span>
+                  </div>
+                  <button className="account-item" onClick={() => { close(); setPage('profile'); }}>
+                    <Icon d={ICONS.user} size={16} /> Account &amp; tokens
+                  </button>
+                  {isOwner && (
+                    <button className="account-item" onClick={() => { close(); setPage('teams'); }}>
+                      <Icon d={ICONS.users} size={16} /> Members &amp; organization
+                    </button>
+                  )}
+                  <button className="account-item" onClick={() => { close(); setPage('settings'); }}>
+                    <Icon d={ICONS.cog} size={16} /> Settings
+                  </button>
+                  <div className="account-menu-sep" />
+                  <div className="account-theme">
+                    <span>Appearance</span>
+                    <ThemeSwitcher compact />
+                  </div>
+                  <div className="account-menu-sep" />
+                  <button className="account-item danger" onClick={() => { close(); doSignOut(); }}>
+                    <Icon d={ICONS.logout} size={16} /> Sign out
+                  </button>
+                </div>
+              )}
+            </SpringPopover>
+          ) : (
+            <div className="sidebar-user">
+              <div className="avatar">SV</div>
+              <div className="sidebar-user-meta">
+                <div className="user-name">Service token</div>
+                <div className="user-role">legacy mode</div>
+              </div>
             </div>
-            {identity && identity.user && (
-              <button
-                className="signout-btn"
-                title="Sign out — clears this browser's session token"
-                aria-label="Sign out"
-                onClick={async () => {
-                  setToken('');
-                  setIdentity(null);
-                  setAuthState('anon');
-                  setPage('dashboard');
-                }}
-              >
-                <Icon d={ICONS.logout} size={16} />
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </aside>
 
       <main className="main">
-        {Screen}
+        <PageTransition pageKey={page}>
+          {Screen}
+        </PageTransition>
       </main>
     </div>
   );
