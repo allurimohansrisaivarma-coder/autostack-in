@@ -12,7 +12,7 @@ Thank you for your interest in contributing! Here's everything you need to get s
 
 ```bash
 # 1. Fork and clone
-git clone https://github.com/YOUR_USERNAME/autostack-in.git
+git clone https://github.com/allurimohansrisaivarma-coder/autostack-in.git
 cd autostack-in
 
 # 2. Python environment
