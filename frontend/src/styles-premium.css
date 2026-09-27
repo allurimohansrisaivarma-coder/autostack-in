@@ -121,6 +121,17 @@ html[data-fx="touch"] .pcard::before, html[data-fx="reduced"] .pcard::before { d
   z-index: 60; display: flex; align-items: center; gap: 16px;
   padding: 8px 10px 8px 12px; border-radius: 999px; min-width: 0;
 }
+/* ONE refined edge for BOTH floating pills (public + app): 1px hairline in
+   the theme's own text color at 14% — light mode renders a soft slate line
+   on the frosted panel, dark mode a soft white line. Clearly defines the
+   pill against any background without ever reading as a hard outline; the
+   .glass::before top highlight keeps the premium lensed feel. */
+.landing-nav,
+.floating-nav {
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+}
+html[data-fx="reduced"] .landing-nav,
+html[data-fx="reduced"] .floating-nav { border-color: var(--border-strong); }
 .landing-nav .ln-brand {
   display: inline-flex; align-items: center; flex-shrink: 0;
   padding: 0 4px; border: none; background: none; cursor: pointer; border-radius: 12px;
@@ -500,13 +511,16 @@ html[data-theme="light"] .cs-frame { box-shadow: 0 40px 80px -30px rgba(15, 23, 
 .lf-links button:hover { color: var(--text); }
 
 /* ═══ Floating navigation system (replaces the sidebar) ═══════════════════
-   One object, three states: desktop pill with dropdowns, compact top bar on
-   tablet, top bar + grouped sheet on mobile. Material reuses .glass. */
+   Signed-in twin of the public landing pill: SAME floating centered glass
+   pill — fit-content width, fully rounded, frosted — so there is exactly one
+   navbar design app-wide. It carries the product groups, search, bell and
+   account; dropdown panels anchor below as before. */
 .floating-nav {
-  position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-  width: min(1240px, calc(100vw - 16px)); height: 56px; z-index: 90;
-  display: flex; align-items: center; gap: 8px; padding: 0 12px;
-  border-radius: 17px;
+  position: fixed; top: 14px; left: 0; right: 0; margin-inline: auto;
+  width: fit-content; max-width: min(96vw, 1240px);
+  height: 56px; z-index: 90;
+  display: flex; align-items: center; gap: 8px; padding: 0 14px;
+  border-radius: 999px; min-width: 0;
   transition: box-shadow 0.25s ease, background 0.25s ease;
 }
 .floating-nav.scrolled { box-shadow: 0 12px 32px -14px rgba(2, 6, 23, 0.35); }
@@ -856,7 +870,9 @@ button.primary:not(:disabled):active { transform: scale(0.98); }
    These overrides MUST live in this file (after the base rules above) so they
    win the cascade against the base .fn-groups/.nav-burger rules. */
 @media (max-width: 860px) {
-  .floating-nav { width: calc(100vw - 16px); top: 8px; height: 54px; }
+  /* Same pill on mobile: centered fit-content bar (burger · logo · search ·
+     bell · account), never a full-width strip — one navbar design everywhere. */
+  .floating-nav { width: fit-content; top: 8px; height: 54px; }
   .fn-groups { display: none; }
   .nav-burger { display: inline-flex; }
   .nav-kbd { display: none; }
@@ -869,7 +885,7 @@ button.primary:not(:disabled):active { transform: scale(0.98); }
 /* ultra-narrow phones: tighten the app bar so every control fits without
    overflow (burger + logo + search + bell + avatar on a 320px screen) */
 @media (max-width: 400px) {
-  .floating-nav { height: 52px; gap: 4px; padding: 0 8px; }
+  .floating-nav { height: 52px; gap: 4px; padding: 0 10px; }
   .nav-icon-btn { padding: 7px; }
   .fn-brand { padding: 2px 2px; }
   .nav-account-trigger .avatar { width: 28px; height: 28px; font-size: 11px; }

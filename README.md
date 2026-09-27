@@ -200,8 +200,12 @@ light source crisp and preserves the dark source's glow via an emission matte.
 Public pages (marketing landing, sign-in/sign-up) share ONE navbar: the
 floating centered pill from the design reference — logo (click → top),
 Capabilities / How it works / Trust, Sign in, and a primary "Get started"
-button. The signed-in app keeps its own floating pill with product dropdowns
-and the account menu.
+button. The signed-in app uses the SAME floating glass pill (fit-content,
+centered, fully rounded, frosted) carrying the product dropdowns, search,
+notifications and the account menu — one navbar design everywhere. Both pills
+take a single refined hairline edge: `1px solid color-mix(var(--text) 14%)`,
+theme-adaptive (soft slate on light, soft white on dark), slightly visible
+without ever reading as a hard outline.
 
 ### Roles
 
