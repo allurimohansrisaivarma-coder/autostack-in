@@ -354,7 +354,7 @@ function MobileSheet({ open, setOpen, identity, isOwner, onNavigate, onSignOut, 
             transition={{ type: 'spring', stiffness: 320, damping: 34 }}
           >
             <div className="sheet-head">
-              <ThemeLogo lockup={false} h={28} />
+              <ThemeLogo lockup={false} h={32} />
               <button className="nav-icon-btn" aria-label="Close navigation" onClick={() => setOpen(false)}>
                 <Icon d={ICONS.x} size={18} />
               </button>
@@ -448,7 +448,7 @@ export function FloatingNav({ page, setPage, identity, isOwner, live, onSignOut 
         </button>
 
         <button className="fn-brand" aria-label="AutoStack IN — home" title="Home" onClick={() => setPage('landing')}>
-          <ThemeLogo lockup h={24} />
+          <ThemeLogo lockup h={30} />
         </button>
 
         <nav className="fn-groups" aria-label="Application">

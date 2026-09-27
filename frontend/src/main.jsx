@@ -234,7 +234,10 @@ function App() {
       />;
     }
     return (
-      <AuthScreen>
+      <AuthScreen
+        onSignIn={() => setAuthMode('login')}
+        onSignUp={() => setAuthMode('signup')}
+      >
         <Login
           setPage={setPage}
           initialMode={authMode}

@@ -113,11 +113,21 @@ html[data-fx="touch"] .pcard::before, html[data-fx="reduced"] .pcard::before { d
 /* ─── Landing: hero ─────────────────────────────────────────────────────────── */
 .landing { position: relative; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: clip; }
 .landing-nav {
-  position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
-  z-index: 60; display: flex; align-items: center; gap: 18px;
-  padding: 8px 10px 8px 14px; border-radius: 999px; min-width: 0; max-width: min(92vw, 720px);
+  /* Centered with margins, not translateX: framer-motion writes an inline
+     transform for the entrance animation, which would override translateX
+     and shove the pill to the right edge. */
+  position: fixed; top: 14px; left: 0; right: 0; margin-inline: auto;
+  width: fit-content; max-width: min(92vw, 760px);
+  z-index: 60; display: flex; align-items: center; gap: 16px;
+  padding: 8px 10px 8px 12px; border-radius: 999px; min-width: 0;
 }
-.landing-nav .ln-brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14px; letter-spacing: -0.01em; white-space: nowrap; }
+.landing-nav .ln-brand {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  padding: 0 4px; border: none; background: none; cursor: pointer; border-radius: 12px;
+}
+.landing-nav .ln-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.landing-nav .ln-brand .theme-logo { height: 36px; }
+.landing-nav .ln-brand .theme-logo img { filter: none; box-shadow: none; }
 .landing-nav .ln-links { display: flex; gap: 2px; }
 .ln-link {
   font-size: 13px; font-weight: 550; color: var(--text-2);
@@ -288,6 +298,7 @@ html[data-fx="dark"] .btn-hero, [data-theme="dark"] .btn-hero { color: #0b1220; 
 .auth-hero .ah-copy h1 { font-size: clamp(34px, 4.6vw, 54px); letter-spacing: -0.035em; line-height: 1.06; font-weight: 700; }
 .auth-hero .ah-copy p { color: var(--text-2); font-size: 16px; line-height: 1.6; max-width: 46ch; }
 .auth-hero .ah-brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 16px; }
+.auth-hero .ah-brand .theme-logo { height: 44px; }
 .auth-points { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 .auth-points .ap { display: flex; gap: 10px; align-items: center; font-size: 14px; color: var(--text-2); }
 .auth-points .ap svg { color: var(--ok); flex-shrink: 0; }
@@ -497,6 +508,8 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
 
 .nav-burger { display: none; }
 .fn-brand { display: inline-flex; align-items: center; padding: 4px 6px; border-radius: 10px; background: none; border: none; cursor: pointer; }
+.fn-brand .theme-logo { height: 30px; }
+.fn-brand .theme-logo img { filter: none; box-shadow: none; }
 .fn-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .fn-groups { display: flex; align-items: center; gap: 2px; margin-left: 8px; }
