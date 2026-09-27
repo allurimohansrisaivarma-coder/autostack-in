@@ -487,6 +487,12 @@ html[data-theme="light"] .cs-frame { box-shadow: 0 40px 80px -30px rgba(15, 23, 
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center;
   max-width: 1120px; margin: 0 auto; padding: 46px 24px 60px;
 }
+/* ultra-narrow: wrap the two-column footer instead of clipping it */
+@media (max-width: 560px) {
+  .landing-footer { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; gap: 14px; }
+  .lf-links { flex-wrap: wrap; justify-content: center; row-gap: 6px; }
+  .lf-copy { max-width: 100%; }
+}
 .landing-footer .lf-copy { color: var(--text-3); font-size: 13px; line-height: 1.6; }
 .landing-footer .lf-copy strong { color: var(--text); }
 .lf-links { display: flex; gap: 18px; }
@@ -498,7 +504,7 @@ html[data-theme="light"] .cs-frame { box-shadow: 0 40px 80px -30px rgba(15, 23, 
    tablet, top bar + grouped sheet on mobile. Material reuses .glass. */
 .floating-nav {
   position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-  width: min(1240px, calc(100vw - 32px)); height: 56px; z-index: 90;
+  width: min(1240px, calc(100vw - 16px)); height: 56px; z-index: 90;
   display: flex; align-items: center; gap: 8px; padding: 0 12px;
   border-radius: 17px;
   transition: box-shadow 0.25s ease, background 0.25s ease;
@@ -688,6 +694,10 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
 .app-home .ah-quick-card svg:last-child { margin-left: auto; opacity: 0.5; }
 @media (max-width: 1024px) { .app-home .ah-quick { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px) { .app-home .ah-quick { grid-template-columns: 1fr; } .app-home .ah-hero { padding: 26px 0 30px; } }
+/* midsize phones (321–560px): two quick cards per row instead of one huge card */
+@media (min-width: 460px) and (max-width: 560px) {
+  .app-home .ah-quick { grid-template-columns: repeat(2, 1fr); }
+}
 
 /* ═══ Polish system — unified controls, type scale, tables, states ═══════
    Single override layer (loads last): one spacing rhythm, one control style,
@@ -855,6 +865,14 @@ button.primary:not(:disabled):active { transform: scale(0.98); }
   .nav-panel { position: fixed; top: 68px; left: 8px; right: 8px; min-width: 0; width: auto; }
   .nav-panel-4 { grid-template-columns: 1fr; min-width: 0; }
   .notif-panel { position: fixed; top: 68px; left: 8px; right: 8px; width: auto; }
+}
+/* ultra-narrow phones: tighten the app bar so every control fits without
+   overflow (burger + logo + search + bell + avatar on a 320px screen) */
+@media (max-width: 400px) {
+  .floating-nav { height: 52px; gap: 4px; padding: 0 8px; }
+  .nav-icon-btn { padding: 7px; }
+  .fn-brand { padding: 2px 2px; }
+  .nav-account-trigger .avatar { width: 28px; height: 28px; font-size: 11px; }
 }
 
 @media (max-width: 1024px) {
