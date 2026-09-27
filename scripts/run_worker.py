@@ -13,6 +13,13 @@ import uvicorn  # noqa: E402
 
 from backend.app import app  # noqa: E402
 from backend.roadmap_routes import start_trigger_loop_if_needed  # noqa: E402
+from backend.spike_config import DATA_DIR, FIXTURES_DIR  # noqa: E402
+
+# Ensure sample tracking CSV is present so demo workflows work out-of-the-box
+_sample_target = DATA_DIR / "resources" / "sample-tracking-file" / "clients.csv"
+if not _sample_target.is_file() and (FIXTURES_DIR / "clients-before.csv").is_file():
+    _sample_target.parent.mkdir(parents=True, exist_ok=True)
+    _sample_target.write_bytes((FIXTURES_DIR / "clients-before.csv").read_bytes())
 
 start_trigger_loop_if_needed()
 
