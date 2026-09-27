@@ -178,7 +178,10 @@ function NotFound({ setPage }) {
           <p className="muted">That link doesn't match any page in this workspace.</p>
         </div>
       </header>
-      <div><button className="btn" onClick={() => setPage('dashboard')}>Go to Dashboard</button></div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button className="btn" onClick={() => setPage('dashboard')}>Go to Dashboard</button>
+        <button className="btn-outline" onClick={() => setPage('landing')}>Go to Home</button>
+      </div>
     </div>
   );
 }

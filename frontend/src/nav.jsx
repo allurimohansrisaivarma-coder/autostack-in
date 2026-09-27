@@ -91,6 +91,7 @@ export function AccountMenu({ identity, isOwner, onNavigate, onSignOut, compact 
   useClickOutside(open, () => setOpen(false), ref);
   const close = () => setOpen(false);
   const user = identity && identity.user;
+  const role = identity && identity.role;
   const item = (label, icon, fn, danger = false) => (
     <button className={`account-item ${danger ? 'danger' : ''}`} onClick={() => { close(); fn(); }}>
       <Icon d={icon} size={16} /> {label}
@@ -107,7 +108,7 @@ export function AccountMenu({ identity, isOwner, onNavigate, onSignOut, compact 
         {!compact && user && (
           <span className="account-user-meta">
             <span className="user-name">{user.display_name || user.username}</span>
-            <span className="user-role">{identity.role} · {identity.capabilities.tier}</span>
+            <span className="user-role">{role} · {identity.capabilities.tier}</span>
           </span>
         )}
         <Icon d={ICONS.chevron} size={13} />
@@ -124,7 +125,7 @@ export function AccountMenu({ identity, isOwner, onNavigate, onSignOut, compact 
           >
             <div className="account-menu-head">
               <span className="user-name">{user ? (user.display_name || user.username) : 'Service token'}</span>
-              <span className="user-role">{user ? `@${user.username} · ${identity.role} · ${identity.capabilities.tier} tier` : 'legacy mode'}</span>
+              <span className="user-role">{user ? `@${user.username} · ${role} · ${identity.capabilities.tier} tier` : 'legacy mode'}</span>
             </div>
             {item('Account & tokens', ICONS.user, () => onNavigate('profile'))}
             {isOwner && item('Members & organization', ICONS.users, () => onNavigate('teams'))}
@@ -384,6 +385,17 @@ function MobileSheet({ open, setOpen, identity, isOwner, onNavigate, onSignOut, 
               <button className="sheet-item" onClick={() => { setOpen(false); onNavigate('settings'); }}>
                 <Icon d={ICONS.cog} size={17} /> <span className="npi-label">Settings</span>
               </button>
+              <button className="sheet-item" onClick={() => { setOpen(false); onNavigate('notifications'); }}>
+                <Icon d={ICONS.bell} size={17} /> <span className="npi-label">Notifications</span>
+              </button>
+              <div className="sheet-group">
+                <div className="sheet-group-head on" style={{ cursor: 'default' }}>
+                  Appearance
+                </div>
+                <div className="sheet-group-body" style={{ padding: '10px 14px' }}>
+                  <ThemeSwitcher compact />
+                </div>
+              </div>
               <button className="sheet-item danger" onClick={() => { setOpen(false); onSignOut(); }}>
                 <Icon d={ICONS.logout} size={17} /> <span className="npi-label">Sign out</span>
               </button>

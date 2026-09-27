@@ -200,19 +200,34 @@ metallic variant in dark mode — on every surface including the floating nav
 ### Roles
 
 Four org roles gate every mutating route: **observer** (read-only) < **operator** (run /
-stage / create workflows / drive bridge callbacks) < **approver** (sandbox-test /
-activate automations) < **owner** (publish to registry, admin: tier, members, triggers,
-delete workflows). Service tokens (the worker token) pass at owner level; user tokens
-are resolved through team membership. First registered local user becomes owner;
-subsequent registrations join as operator (local-first self-serve design).
+stage / create workflows / manage triggers / drive bridge callbacks) < **approver**
+(sandbox-test + activate automations) < **owner** (publish / withdraw from registry,
+admin: tier, members, runners, delete workflows). Service tokens (the worker token)
+pass at owner level; user tokens are resolved through team membership. First
+registered local user becomes owner; subsequent registrations join as operator
+(local-first self-serve design) — observers are granted deliberately by an owner.
 
 Enforcement is server-side on every route (verified endpoint-by-endpoint with real
 role accounts — `scripts/authz_matrix.py`): observers get `403` on all writes
 including node callbacks and the trigger tick; operators cannot test/activate or
 publish; approvers cannot publish or administer; only an owner can
-`DELETE /api/workflows/{id}` or change the org tier. A soft-deleted workflow id can
+`DELETE /api/workflows/{id}`, publish, or change the org tier. A soft-deleted workflow id can
 never be reused (no silent resurrection). Token lifecycle: user tokens are issued
 per-user, scoped to that user for revocation, and die immediately on revoke.
+
+### Organization context: org types, departments, process types
+
+Workflows (and processes) carry a classification context chosen in Create → Context:
+**organization type** (corporate / government / individual / nonprofit / education),
+**size** (small / medium / large; individuals are solo), **department** (per org
+type — e.g. finance, revenue, licensing, personal), and **process type** (per
+department — e.g. accounts_payable, tax_filing, license_renewal). The cascading
+selectors in the create wizard are driven by `GET /api/org/catalog` (one source of
+truth shared with the server-side validator), so incoherent combinations are
+refused with a 422 both at bind time (`POST /api/plan/{id}/create-workflow`) and
+when creating processes or setting the workspace profile (`/api/org/profile`,
+owner-only). Classification shows on the workflow detail panel and free-text
+"Other" process types are supported for contexts outside the catalog.
 
 ### Running a workflow three ways
 

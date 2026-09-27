@@ -208,6 +208,7 @@ export function Teams({ identity }) {
   const [invite, setInvite] = useState(null);
   const [procName, setProcName] = useState('');
   const [err, setErr] = useState(null);
+  const [procErr, setProcErr] = useState(null);
 
   async function refresh() {
     try {
@@ -271,7 +272,12 @@ export function Teams({ identity }) {
         {isOwner && (
           <>
             <div className="field"><input placeholder="new process name" value={procName} onChange={e => setProcName(e.target.value)} /></div>
-            <button className="primary" onClick={async () => { await api.createProcess(procName); setProcName(''); refresh(); }}>Create process</button>
+            <button className="primary" onClick={async () => {
+              setProcErr(null);
+              try { await api.createProcess(procName); setProcName(''); refresh(); }
+              catch (e) { setProcErr(e.message); }
+            }}>Create process</button>
+            {procErr && <div className="error">{procErr}</div>}
           </>
         )}
         {!isOwner && <p className="muted">Creating processes requires the owner role.</p>}
@@ -291,6 +297,7 @@ export function Runners({ identity }) {
   const [name, setName] = useState('');
   const [pairing, setPairing] = useState(null);
   const [err, setErr] = useState(null);
+  const [regErr, setRegErr] = useState(null);
 
   async function refresh() { try { setRunners(await api.runners()); } catch (e) { setErr(e.message); } }
   useState(() => { refresh(); });
@@ -305,15 +312,21 @@ export function Runners({ identity }) {
         {isOwner ? (
           <>
             <div className="field"><input placeholder="runner name" value={name} onChange={e => setName(e.target.value)} /></div>
-            <button className="primary" onClick={async () => { await api.registerRunner(name || 'local-runner', 'local'); setName(''); refresh(); }}>Register local runner</button>
+            <button className="primary" onClick={async () => {
+              setRegErr(null);
+              try { await api.registerRunner(name || 'local-runner', 'local'); setName(''); refresh(); }
+              catch (e) { setRegErr(e.message); }
+            }}>Register local runner</button>
             <button className="link" onClick={async () => {
+              setRegErr(null);
               try {
                 const r = await api.registerRunner(name || 'office-runner', 'paired');
                 const p = await api.pairRunner(r.runner_id);
                 setPairing(p);
                 refresh();
-              } catch (e) { setErr(e.message); }
+              } catch (e) { setRegErr(e.message); }
             }}>Register paired runner (team tier)</button>
+            {regErr && <div className="error">{regErr}</div>}
             {pairing && (
               <div className="token-reveal">
                 <strong>Pairing code — enter on the runner host:</strong>
@@ -345,14 +358,16 @@ export function Runners({ identity }) {
 // ── Scheduling (opt-in, evidence-gated) ───────────────────────────────────────
 
 export function Scheduling({ identity }) {
-  const isOwner = !!(identity && identity.role === 'owner');
+  // Triggers are workflows-management: operator+ can create/enable/disable
+  // (backend requires "run"); the old owner-only gate falsely blocked operators.
+  const rank = { observer: 0, operator: 1, approver: 2, owner: 3 }[identity && identity.role] ?? -1;
+  const canManage = rank >= 1;
   const [wfs, setWfs] = useState(null);
   const [triggers, setTriggers] = useState(null);
   const [wid, setWid] = useState('');
   const [dates, setDates] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [err, setErr] = useState(null);
-  const [secret, setSecret] = useState(null);
 
   async function refresh() {
     try { setWfs(await api.listWorkflows()); setTriggers(await api.triggers()); }
@@ -367,7 +382,7 @@ export function Scheduling({ identity }) {
       </header>
       {err && <div className="error">{err}</div>}
       <Card title="Create a schedule">
-        {isOwner ? (
+        {canManage ? (
           <>
             <div className="field">
               <select value={wid} onChange={e => setWid(e.target.value)}>
@@ -384,30 +399,31 @@ export function Scheduling({ identity }) {
               I confirm this recurrence from real usage (not a demo cycle)
             </label>
             <button className="primary" onClick={async () => {
-              setErr(null); setSecret(null);
+              setErr(null);
               try {
                 const config = {
                   observed_dates: dates.split(',').map(s => s.trim()).filter(Boolean),
                   user_confirmed: confirmed,
                 };
-                const t = await api.createTrigger(wid, 'schedule', config, confirmed ? 'user-confirmed recurrence' : 'observed dates');
-                setSecret(t.trigger_id);
+                await api.createTrigger(wid, 'schedule', config, confirmed ? 'user-confirmed recurrence' : 'observed dates');
                 refresh();
               } catch (e) { setErr(e.message); }
             }}>Create schedule</button>
             <p className="muted">Schedules need 3+ distinct observed dates or explicit confirmation — enforced by the worker.</p>
           </>
         ) : (
-          <p className="muted">Creating schedules requires the owner role.</p>
+          <p className="muted">Creating schedules requires the operator role or higher.</p>
         )}
       </Card>
       <Card title="Triggers">
         {triggers && triggers.triggers.map(t => (
           <Row key={t.id}>
             <div>{t.kind} → {t.workflow_id} {t.enabled ? '' : '(disabled)'}</div>
-            <button className="link" onClick={async () => { await (t.enabled ? api.disableTrigger(t.id) : api.enableTrigger(t.id)); refresh(); }}>
-              {t.enabled ? 'disable' : 'enable'}
-            </button>
+            {canManage && (
+              <button className="link" onClick={async () => { try { await (t.enabled ? api.disableTrigger(t.id) : api.enableTrigger(t.id)); refresh(); } catch (e) { setErr(e.message); } }}>
+                {t.enabled ? 'disable' : 'enable'}
+              </button>
+            )}
           </Row>
         ))}
         {triggers && triggers.triggers.length === 0 && <p className="muted">No triggers yet.</p>}

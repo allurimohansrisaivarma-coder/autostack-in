@@ -52,13 +52,24 @@ def primary_org(db: Session) -> Org:
 
 
 def user_role(db: Session, user) -> str:
-    """A user's effective role in the primary org (admin users are owners)."""
+    """A user's effective role in the primary org (admin users are owners).
+
+    Bug fix (create-flow audit): users without an explicit membership row are
+    OPERATOR, not observer. Registration provisions 'operator' (the working
+    default — observers are created deliberately by an owner), so a missing row
+    can only mean a legacy/provisioned account; defaulting those to read-only
+    locked every mutating route behind a false 403. Admin users stay owners.
+    """
     from backend.models import Membership
     from sqlalchemy import select
     org = primary_org(db)
     m = db.scalar(select(Membership).where(Membership.org_id == org.id,
                                            Membership.user_id == user.id))
-    return m.role if m else ("owner" if user.is_admin else "observer")
+    if m is not None:
+        return m.role
+    if user.is_admin:
+        return "owner"
+    return "operator"
 
 
 def members(db: Session, org_id: str) -> list[dict]:
@@ -176,6 +187,118 @@ def create_process(db: Session, org_id: str, name: str, description: str = "",
     return p
 
 
+# ── org profile: organization types / sizes, departments, process types ──────
+# (Product §5) The context model must cover far more than corporate back
+# offices: corporate enterprises (by size), government agencies, and
+# individuals/solo users. Process types are offered per (org type, size,
+# department) so the create flow only ever shows coherent choices.
+
+ORG_TYPES = ("corporate", "government", "individual", "nonprofit", "education")
+
+# Size only applies to organizations — individuals/solo users pick "solo".
+ORG_SIZES = ("solo", "small", "medium", "large")
+
+# Department/team catalog per organization type. Values are stable ids shown
+# through the API; the frontend maps ids to labels.
+DEPARTMENTS: dict[str, tuple[str, ...]] = {
+    "corporate": (
+        "finance", "operations", "procurement", "human_resources",
+        "sales", "marketing", "legal", "it", "customer_support",
+    ),
+    "government": (
+        "revenue", "licensing", "public_works", "health",
+        "education", "social_services", "compliance", "records",
+    ),
+    "individual": ("personal", "freelance", "consulting"),
+    "nonprofit": ("programs", "fundraising", "volunteers", "grants", "admin"),
+    "education": ("admissions", "academics", "examinations", "library", "admin"),
+}
+
+# Process types per department — filtered by (org_type, size, department).
+PROCESS_TYPES: dict[str, tuple[str, ...]] = {
+    # corporate
+    "finance": ("accounts_payable", "accounts_receivable", "invoice_po_matching",
+                "tax_filing", "expense_reimbursement", "payroll_processing", "audit_prep"),
+    "operations": ("task_tracking", "vendor_followup", "inventory_updates",
+                   "report_generation", "escalation_handling"),
+    "procurement": ("vendor_onboarding", "purchase_orders", "quote_comparison",
+                    "contract_renewals", "goods_receipt"),
+    "human_resources": ("employee_onboarding", "leave_management", "payroll_queries",
+                        "recruitment_pipeline", "exit_process"),
+    "sales": ("lead_followup", "quote_generation", "order_processing",
+              "customer_onboarding", "collections"),
+    "marketing": ("campaign_tracking", "content_approvals", "lead_nurture", "report_generation"),
+    "legal": ("contract_review", "compliance_calendar", "document_drafting"),
+    "it": ("ticket_triage", "access_requests", "backup_verification", "asset_tracking"),
+    "customer_support": ("ticket_followup", "sla_escalation", "feedback_triage", "knowledge_base_updates"),
+    # government
+    "revenue": ("tax_filing", "return_processing", "notice_generation", "payment_reconciliation"),
+    "licensing": ("license_renewal", "application_followup", "approval_workflows", "status_notifications"),
+    "public_works": ("complaint_triage", "work_orders", "inspection_scheduling", "report_generation"),
+    "health": ("patient_followup", "campus_screening", "supply_tracking", "compliance_and_filing"),
+    "education": ("enrollment_processing", "certification_issuance", "compliance_and_filing"),
+    "social_services": ("benefit_applications", "case_followup", "eligibility_screening"),
+    "compliance": ("compliance_and_filing", "audit_prep", "approval_workflows", "document_drafting"),
+    "records": ("records_requests", "data_entry_verification", "archival_updates"),
+    # individual / solo
+    "personal": ("personal_finance", "bill_reminders", "document_management", "task_tracking"),
+    "freelance": ("invoicing", "client_followup", "quote_generation", "project_tracking"),
+    "consulting": ("client_reporting", "engagement_tracking", "invoicing", "proposal_generation"),
+    # nonprofit
+    "programs": ("beneficiary_tracking", "grant_reporting", "compliance_and_filing"),
+    "fundraising": ("donor_followup", "campaign_tracking", "pledge_management"),
+    "volunteers": ("volunteer_onboarding", "shift_scheduling", "hours_tracking"),
+    "grants": ("grant_applications", "compliance_and_filing", "report_generation"),
+    "admin": ("compliance_and_filing", "document_management", "report_generation", "approval_workflows"),
+    # education
+    "admissions": ("application_followup", "enrollment_processing", "document_management"),
+    "academics": ("course_scheduling", "attendance_tracking", "grade_processing"),
+    "examinations": ("exam_scheduling", "result_processing", "certificate_issuance"),
+    "library": ("overdue_notices", "inventory_updates", "membership_management"),
+}
+
+# Fallback for departments missing from PROCESS_TYPES (never an empty menu).
+_DEFAULT_PROCESS_TYPES = ("report_generation", "task_tracking", "compliance_and_filing",
+                          "approval_workflows", "document_management")
+
+# Sizes available per org type: individuals are always solo (UI hides the picker).
+ORG_SIZES_FOR_TYPE: dict[str, tuple[str, ...]] = {
+    "corporate": ("small", "medium", "large"),
+    "government": ("small", "medium", "large"),
+    "nonprofit": ("small", "medium", "large"),
+    "education": ("small", "medium", "large"),
+    "individual": ("solo",),
+}
+
+
+def valid_context(org_type: str | None, size: str | None, department: str | None,
+                  process_type: str | None) -> list[str]:
+    """Validate a full context tuple; returns a list of human-readable problems
+    (empty = valid). Shared by the API validators and the UI catalog."""
+    problems: list[str] = []
+    if org_type not in ORG_TYPES:
+        problems.append(f"unknown organization type: {org_type}")
+        return problems
+    if size not in ORG_SIZES_FOR_TYPE.get(org_type, ORG_SIZES):
+        problems.append(f"invalid size '{size}' for organization type '{org_type}'")
+    if department not in DEPARTMENTS.get(org_type, ()):  # unknown dept for this org type
+        problems.append(f"unknown department '{department}' for organization type '{org_type}'")
+        return problems
+    allowed = PROCESS_TYPES.get(department, _DEFAULT_PROCESS_TYPES)
+    if process_type not in allowed:
+        problems.append(f"unknown process type '{process_type}' for department '{department}'")
+    return problems
+
+
+def process_types_for(org_type: str, size: str, department: str) -> list[str]:
+    """Coherent process-type options for a (org type, size, department) choice.
+    Department not in the catalog falls back to the generic set — the UI never
+    shows an empty menu."""
+    if department in PROCESS_TYPES:
+        return list(PROCESS_TYPES[department])
+    return list(_DEFAULT_PROCESS_TYPES)
+
+
 def list_processes(db: Session, org_id: str) -> list[Process]:
     return list(db.scalars(select(Process).where(Process.org_id == org_id)
                            .order_by(Process.created_at)))
@@ -204,4 +327,39 @@ def workflow_process_map(db: Session, workflow_ids: list[str]) -> dict[str, str]
                 out[wid] = json.loads(row.value_json)
             except Exception:
                 out[wid] = row.value_json
+    return out
+
+
+def set_workflow_context(db: Session, workflow_id: str, org_type: str, size: str,
+                         department: str, process_type: str) -> None:
+    """Persist the classification context of a workflow (create step 1).
+    Stored as a Setting JSON row so the Workflow model stays untouched (same
+    pattern as workflow_process). Invalid tuples are refused here too."""
+    from backend.models import Setting
+    problems = valid_context(org_type, size, department, process_type)
+    if problems:
+        raise ValueError("; ".join(problems))
+    row = db.get(Setting, f"workflow_context:{workflow_id}")
+    payload = json.dumps({"org_type": org_type, "size": size,
+                          "department": department, "process_type": process_type})
+    if row is None:
+        row = Setting(key=f"workflow_context:{workflow_id}", value_json=payload)
+        db.add(row)
+    else:
+        row.value_json = payload
+    db.commit()
+
+
+def workflow_context_map(db: Session, workflow_ids: list[str]) -> dict[str, dict]:
+    """workflow_id -> {org_type, size, department, process_type} (missing = {})."""
+    from backend.models import Setting
+    out: dict[str, dict] = {}
+    for wid in workflow_ids:
+        row = db.get(Setting, f"workflow_context:{wid}")
+        if row is None:
+            continue
+        try:
+            out[wid] = json.loads(row.value_json)
+        except Exception:
+            continue
     return out

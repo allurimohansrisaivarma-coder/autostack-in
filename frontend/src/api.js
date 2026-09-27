@@ -67,7 +67,7 @@ export const api = {
   generate: (planId) => request('/api/artifacts/generate', { method: 'POST', body: { plan_id: planId, approve_generation: true } }),
   createTestJob: (artifactId, consent = true) => request('/api/test-jobs', { method: 'POST', body: { artifact_id: artifactId, fixture: 'reset', consent } }),
   approveActivation: (artifactId, jobId) => request('/api/approvals/activation', { method: 'POST', body: { artifact_id: artifactId, job_id: jobId, note: 'approved in app' } }),
-  createWorkflowFromPlan: (planId) => request(`/api/plan/${encodeURIComponent(planId)}/create-workflow`, { method: 'POST', body: {} }),
+  createWorkflowFromPlan: (planId, context) => request(`/api/plan/${encodeURIComponent(planId)}/create-workflow`, { method: 'POST', body: context || {} }),
 
   listWorkflows: () => request('/api/workflows'),
   listRuns: () => request('/api/runs/list'),
@@ -95,6 +95,10 @@ export const api = {
   capabilities: () => request('/api/me/capabilities'),
   setTier: (tier, orgName) => request('/api/org/tier', { method: 'POST', body: { tier, org_name: orgName } }),
   ssoStatus: () => request('/api/org/sso'),
+  orgCatalog: () => request('/api/org/catalog'),
+  orgProfile: () => request('/api/org/profile'),
+  setOrgProfile: (orgType, size, department) =>
+    request('/api/org/profile', { method: 'POST', body: { org_type: orgType, size, department } }),
 
   // ── Roadmap: teams & processes ──
   teamMembers: () => request('/api/team/members'),

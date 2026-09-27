@@ -53,6 +53,21 @@ with db_engine.begin() as _conn:
         _conn.execute(_sqltext(
             f"CREATE INDEX IF NOT EXISTS {_idx} ON {_tbl}({_col})"))
 
+# Additive migration for the context model (product §5): existing databases
+# predate processes.org_type/size/department/process_type. create_all cannot
+# ALTER, so add any missing columns idempotently (legacy rows keep '' meaning
+# "unclassified").
+with db_engine.begin() as _conn:
+    _existing = {row[1] for row in _conn.execute(_sqltext("PRAGMA table_info(processes)"))}
+    for _col, _ddl in (
+        ("org_type", "VARCHAR(24) NOT NULL DEFAULT ''"),
+        ("size", "VARCHAR(16) NOT NULL DEFAULT ''"),
+        ("department", "VARCHAR(40) NOT NULL DEFAULT ''"),
+        ("process_type", "VARCHAR(40) NOT NULL DEFAULT ''"),
+    ):
+        if _col not in _existing:
+            _conn.execute(_sqltext(f"ALTER TABLE processes ADD COLUMN {_col} {_ddl}"))
+
 app = FastAPI(title="AutoStack spike worker", version="0.1.0")
 app.include_router(roadmap_router)
 
@@ -1010,7 +1025,7 @@ class WithdrawBody(BaseModel):
     slug: str
 
 
-@app.post("/api/registry/withdraw", dependencies=[Depends(require_writer)])
+@app.post("/api/registry/withdraw", dependencies=[Depends(require_publisher)])
 def registry_withdraw(body: WithdrawBody, db: Session = Depends(get_db)):
     """Withdrawal stops NEW imports; safe installed copies are not auto-invalidated."""
     from backend.models import RegistryTemplate
@@ -1280,19 +1295,43 @@ def _plan_summary(plan: dict) -> str:
     return " · ".join(parts)
 
 
+class ContextBody(BaseModel):
+    """Create step 1 classification (product §5): org type/size, department,
+    process type. All fields optional so an empty body = legacy no-context
+    bind; a partially-filled body is validated as a whole."""
+    org_type: str = ""
+    size: str = ""
+    department: str = ""
+    process_type: str = ""
+
+
 @app.post("/api/plan/{plan_id}/create-workflow", dependencies=[Depends(require_writer)])
-def create_workflow_from_plan(plan_id: str, db: Session = Depends(get_db)):
+def create_workflow_from_plan(plan_id: str, body: ContextBody | None = None,
+                              db: Session = Depends(get_db)):
     """Bind an activated generated artifact to a real versioned workflow (Phase 5->9).
 
     The version records graph + plan hash + activated code hash together, so the
     provenance chain plan -> code -> workflow is content-addressed end to end.
+    Body (optional): {org_type, size, department, process_type} from create
+    step 1 — validated and stored so the workflow carries its classification.
+    Omitted (or empty) body binds without classification (legacy behavior).
     """
+    from backend import teams
     from backend.engine import graph_build
     from backend.models import GeneratedArtifact
     from backend.models import GenerationPlan  # local import (spike module layout)
     plan_row = db.get(GenerationPlan, plan_id)
     if plan_row is None:
         raise HTTPException(status_code=404, detail={"error": "plan not found"})
+    ctx = body.model_dump() if body is not None else {}
+    if any(ctx.values()):
+        problems = teams.valid_context(ctx.get("org_type", ""), ctx.get("size", ""),
+                                       ctx.get("department", ""),
+                                       ctx.get("process_type", ""))
+        if problems:
+            raise HTTPException(status_code=422, detail={"error": "; ".join(problems)})
+    else:
+        ctx = None
     plan = json.loads(plan_row.plan_json)
     art = (db.query(GeneratedArtifact)
            .filter(GeneratedArtifact.plan_id == plan_id,
@@ -1325,6 +1364,9 @@ def create_workflow_from_plan(plan_id: str, db: Session = Depends(get_db)):
                            artifact_sha256=artifact,
                            changelog="bound from activated generation"))
     plan_row.status = "bound_to_workflow"
+    if ctx is not None:
+        teams.set_workflow_context(db, wf_id, ctx["org_type"], ctx["size"],
+                                   ctx["department"], ctx["process_type"])
     db.commit()
     audit_mod.append(db, "workflow.from_plan",
                      {"plan_id": plan_id, "workflow_id": wf_id, "version": vnext,
@@ -1338,9 +1380,11 @@ def create_workflow_from_plan(plan_id: str, db: Session = Depends(get_db)):
 @app.get("/api/workflows", dependencies=[Depends(require_token)])
 def list_workflows(db: Session = Depends(get_db)):
     # B4: soft-deleted workflows disappear from listings (history is retained)
+    from backend import teams
     wfs = (db.query(Workflow)
            .filter(Workflow.deleted_at.is_(None))
            .order_by(Workflow.created_at).all())
+    contexts = teams.workflow_context_map(db, [wf.id for wf in wfs])
     out = []
     for wf in wfs:
         last = (db.query(WorkflowVersion)
@@ -1350,7 +1394,8 @@ def list_workflows(db: Session = Depends(get_db)):
                 .filter(WorkflowVersion.workflow_id == wf.id).count())
         out.append({"id": wf.id, "name": wf.name, "version": last.version if last else None,
                     "artifact_sha256": last.artifact_sha256 if last else None,
-                    "runs": runs, "created_at": wf.created_at.isoformat() if wf.created_at else None})
+                    "runs": runs, "created_at": wf.created_at.isoformat() if wf.created_at else None,
+                    "context": contexts.get(wf.id, {})})
     return {"workflows": out}
 
 

@@ -34,6 +34,31 @@ export function CreateAutomation({ setPage }) {
   const [bound, setBound] = useState(null);
   const [published, setPublished] = useState(false);
 
+  // Step 1 context (org type → size → department → process type), from the
+  // worker's catalog — never a hardcoded UI list. "Other" is free text.
+  const [catalog, setCatalog] = useState(null);
+  const [ctxOrgType, setCtxOrgType] = useState('corporate');
+  const [ctxSize, setCtxSize] = useState('medium');
+  const [ctxDept, setCtxDept] = useState('finance');
+  const [ctxProcess, setCtxProcess] = useState('accounts_payable');
+  const [ctxOther, setCtxOther] = useState('');
+  useEffect(() => { api.orgCatalog().then(setCatalog).catch(() => setCatalog(null)); }, []);
+
+  // Reset downstream selections whenever an upstream context choice changes.
+  useEffect(() => {
+    if (!catalog) return;
+    if (!catalog.sizes_for_type[ctxOrgType]?.includes(ctxSize)) setCtxSize(catalog.sizes_for_type[ctxOrgType]?.[0] || 'small');
+  }, [ctxOrgType]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!catalog) return;
+    if (!catalog.departments[ctxOrgType]?.includes(ctxDept)) setCtxDept(catalog.departments[ctxOrgType]?.[0] || '');
+  }, [ctxOrgType]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!catalog) return;
+    const allowed = catalog.process_types[ctxDept] || catalog.default_process_types;
+    if (!allowed.includes(ctxProcess)) setCtxProcess(allowed[0] || '');
+  }, [ctxDept, ctxOrgType]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const connected = !!(live && live.connected);
@@ -121,7 +146,13 @@ export function CreateAutomation({ setPage }) {
   }, 'human activation approval recorded');
 
   const bind = () => gate(async () => {
-    const b = await api.createWorkflowFromPlan(planId);
+    const context = {
+      org_type: ctxOrgType,
+      size: ctxSize,
+      department: ctxDept,
+      process_type: ctxOther.trim() ? ctxOther.trim().toLowerCase().replace(/\s+/g, '_') : ctxProcess,
+    };
+    const b = await api.createWorkflowFromPlan(planId, context);
     setBound(b);
     return b;
   }, b => `workflow ${b.workflow_id} v${b.version} bound to plan + activated code`);
@@ -137,6 +168,16 @@ export function CreateAutomation({ setPage }) {
     });
     setPublished(true);
   }, 'published to registry (schema only, no records)');
+
+  // Role awareness: plan/generate/bind are operator+; sandbox test + activation
+  // approval are approver+ (backend enforces; the UI mirrors honestly). The
+  // bind button checks server state (activation), not local session state, so
+  // an operator can bind after an approver activates — the real team flow.
+  const role = (live && live.me && live.me.role) || null;
+  const rank = { observer: 0, operator: 1, approver: 2, owner: 3 }[role] ?? null;
+  const canPlan = rank === null || rank >= 1;
+  const canApprove = rank === null || rank >= 2;
+  const canPublish = rank === null || rank >= 3;
 
   return (
     <div className="screen">
@@ -165,14 +206,46 @@ export function CreateAutomation({ setPage }) {
         {step === 1 && (
           <div className="step-panel">
             <h3>Know your workflow context</h3>
-            <p>Context only — the plan rules themselves are confirmed in step 3. Capture stays opt-in and schema-only.</p>
-            <div className="form-grid">
-              <label>Team / Department
-                <select defaultValue="Finance"><option>Finance</option><option>Operations</option><option>Procurement</option><option>HR</option></select>
-              </label>
-              <label>Process Type
-                <select defaultValue="Compliance and filing"><option>Compliance and filing</option><option>Approval workflows</option><option>Vendor onboarding</option><option>Report generation</option></select>
-              </label>
+            <p>Context only — the plan rules themselves are confirmed in step 3. The organization type drives the departments and process types offered; this classification is stored on the workflow.</p>
+            {catalog ? (
+              <div className="form-grid">
+                <label>Organization type
+                  <select value={ctxOrgType} onChange={e => setCtxOrgType(e.target.value)}>
+                    {catalog.org_types.map(t => (
+                      <option key={t} value={t}>{catalog.labels.org_type[t] || t}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Size
+                  <select value={ctxSize} onChange={e => setCtxSize(e.target.value)} disabled={catalog.sizes_for_type[ctxOrgType]?.length === 1}>
+                    {(catalog.sizes_for_type[ctxOrgType] || []).map(s => (
+                      <option key={s} value={s}>{catalog.labels.size[s] || s}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Team / Department
+                  <select value={ctxDept} onChange={e => setCtxDept(e.target.value)}>
+                    {(catalog.departments[ctxOrgType] || []).map(d => (
+                      <option key={d} value={d}>{catalog.labels.department[d] || d}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Process type
+                  <select value={ctxProcess} onChange={e => setCtxProcess(e.target.value)} disabled={!!ctxOther.trim()}>
+                    {(catalog.process_types[ctxDept] || catalog.default_process_types).map(p => (
+                      <option key={p} value={p}>{catalog.labels.process_type[p] || p}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Other process type (optional — overrides the list)
+                  <input placeholder="e.g. booth allocation for a fair" value={ctxOther}
+                         onChange={e => setCtxOther(e.target.value)} />
+                </label>
+              </div>
+            ) : (
+              <p className="muted">Loading the organization catalog from the worker… (context selectors appear once it loads)</p>
+            )}
+            <div className="form-grid" style={{ marginTop: 14 }}>
               <label>Data Sensitivity
                 <select defaultValue="Medium"><option>Low</option><option>Medium</option><option>High</option></select>
               </label>
@@ -251,7 +324,8 @@ export function CreateAutomation({ setPage }) {
                   </div>}
             </div>
             <div className="publish-actions">
-              <button className="btn-primary" disabled={busy || !connected} onClick={savePlan}>
+              <button className="btn-primary" disabled={busy || !connected || !canPlan}
+                      title={canPlan ? '' : 'creating workflows requires the operator role'} onClick={savePlan}>
                 <Icon d={ICONS.check} size={16} /> {busy ? 'Saving…' : 'Confirm plan'}
               </button>
             </div>
@@ -267,6 +341,12 @@ export function CreateAutomation({ setPage }) {
                 <p>Generated code passes static security validation, then runs in a subprocess sandbox against expected outputs derived from YOUR plan. A failed test blocks activation. Your approval is recorded separately.</p>
               </div>
             </div>
+            {!canApprove && (
+              <div className="info-banner">
+                <Icon d={ICONS.lock} size={16} />
+                <span>Sandbox testing and activation approval need the <b>approver</b> role — an operator generates code and an approver takes over from step 4. Your role: <b>{role || 'unknown'}</b>.</span>
+              </div>
+            )}
             <div className="test-rail">
               {[
                 ['Plan confirmed', !!planId, 'sha-bound'],
@@ -282,10 +362,16 @@ export function CreateAutomation({ setPage }) {
               ))}
             </div>
             <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
-              <button className="btn-outline" disabled={busy || !planId || !!artifact} onClick={generate}>1 · Generate</button>
-              <button className="btn-outline" disabled={busy || !artifact || (job && job.status === 'passed')} onClick={runTest}>2 · Run sandbox test</button>
-              <button className="btn-primary" disabled={busy || !job || job.status !== 'passed' || !!approval} onClick={approve}>3 · Approve activation</button>
+              <button className="btn-outline" disabled={busy || !planId || !!artifact || !canPlan} onClick={generate}>1 · Generate</button>
+              <button className="btn-outline" disabled={busy || !artifact || (job && job.status === 'passed') || !canApprove}
+                      title={canApprove ? '' : 'requires the approver role'} onClick={runTest}>2 · Run sandbox test</button>
+              <button className="btn-primary" disabled={busy || !job || job.status !== 'passed' || !!approval || !canApprove}
+                      title={canApprove ? '' : 'requires the approver role'} onClick={approve}>3 · Approve activation</button>
               {approval && <button className="btn-dark" onClick={() => setStep(5)}>Continue to bind <Icon d={ICONS.arrow} size={14} /></button>}
+              {!approval && artifact && canPlan && (
+                <button className="btn-dark" title="an approver can also take over from here"
+                        onClick={() => setStep(5)}>Continue to bind <Icon d={ICONS.arrow} size={14} /></button>
+              )}
             </div>
             {job && job.report && job.report.checks && (
               <div className="detail-section">
@@ -304,17 +390,19 @@ export function CreateAutomation({ setPage }) {
         {step === 5 && (
           <div className="step-panel">
             <h3>Bind the workflow — then publish if you choose</h3>
-            <p>Binding creates a versioned workflow whose hash covers graph + plan + activated code together. Publication is separate consent and shares the schema only.</p>
+            <p>Binding creates a versioned workflow whose hash covers graph + plan + activated code together. Publication is separate consent and shares the schema only.{!approval && ' Binding needs an ACTIVATED artifact — an approver must complete the sandbox test and activation approval first.'}</p>
             <div className="publish-box">
               <div className="publish-stat"><span>Plan</span><b>{planId ? `${planId.slice(0, 8)}…` : '—'}</b></div>
               <div className="publish-stat"><span>Activated code</span><b>{artifact ? `${artifact.code_sha256.slice(0, 10)}…` : '—'}</b></div>
               <div className="publish-stat"><span>Workflow</span><b>{bound ? `${bound.workflow_id} v${bound.version}` : 'not bound'}</b></div>
             </div>
             <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
-              <button className="btn-primary" disabled={busy || !approval || !!bound} onClick={bind}>
+              <button className="btn-primary" disabled={busy || !!bound || !catalog || !canPlan}
+                      onClick={bind}>
                 <Icon d={ICONS.check} size={16} /> {bound ? 'Workflow bound' : 'Create workflow'}
               </button>
-              <button className="btn-outline" disabled={!bound || busy || published} onClick={publish}>
+              <button className="btn-outline" disabled={!bound || busy || published || !canPublish}
+                      title={canPublish ? '' : 'publishing requires the owner role'} onClick={publish}>
                 {published ? 'Published' : 'Publish to Registry'}
               </button>
               {bound && <button className="btn-dark" onClick={() => setPage('workflows')}>Go to Workflows <Icon d={ICONS.arrow} size={14} /></button>}

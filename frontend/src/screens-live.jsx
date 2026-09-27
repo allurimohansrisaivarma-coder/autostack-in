@@ -325,6 +325,14 @@ export function Workflows({ setPage }) {
               <div className="approval-row"><span>Artifact sha256</span><span className="mono dim">{(selected.artifact_sha256 || '').slice(0, 16)}…</span></div>
               <div className="approval-row"><span>Total runs</span><b>{selected.runs}</b></div>
             </div>
+            {selected.context && selected.context.org_type && (
+              <div className="detail-section">
+                <div className="detail-label">Classification</div>
+                <div className="approval-row"><span>Organization</span><b>{String(selected.context.org_type).replace(/_/g, ' ')} · {String(selected.context.size).replace(/_/g, ' ')}</b></div>
+                <div className="approval-row"><span>Department</span><b>{String(selected.context.department).replace(/_/g, ' ')}</b></div>
+                <div className="approval-row"><span>Process type</span><b>{String(selected.context.process_type).replace(/_/g, ' ')}</b></div>
+              </div>
+            )}
             <div className="detail-section">
               <div className="detail-label">Actions</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
@@ -390,6 +398,9 @@ export function Workflows({ setPage }) {
 
 export function Registry({ identity }) {
   const isOwner = !!(identity && identity.role === 'owner');
+  // Imports create untrusted drafts (a write) — observers are read-only.
+  const rank = { observer: 0, operator: 1, approver: 2, owner: 3 }[identity && identity.role] ?? -1;
+  const canImport = rank >= 1;
   const [live, setLive] = useState(null);
   const [search, setSearch] = useState('');
   const [templates, setTemplates] = useState([]);
@@ -501,9 +512,13 @@ export function Registry({ identity }) {
               </div>
               <div className="reg-footer">
                 <div className="reg-stat">Published template — usage stats are not invented</div>
-                <button className="btn-dark" disabled={!connected || st.busy || st.done} onClick={() => doImport(t)}>
-                  {st.done ? 'Imported (untrusted draft)' : st.busy ? 'Importing…' : 'Use Workflow'}
-                </button>
+                {canImport ? (
+                  <button className="btn-dark" disabled={!connected || st.busy || st.done} onClick={() => doImport(t)}>
+                    {st.done ? 'Imported (untrusted draft)' : st.busy ? 'Importing…' : 'Use Workflow'}
+                  </button>
+                ) : (
+                  <span className="muted">Importing requires the operator role or higher.</span>
+                )}
               </div>
               {st.error && <p className="helper-error">Import refused: {st.error}</p>}
               {st.done && <p className="op-sub">Status: {st.done}. {st.note || ''} Re-test and activate locally before running.</p>}
