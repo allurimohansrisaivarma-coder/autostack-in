@@ -48,9 +48,23 @@ artifacts/spike/token
 artifacts/spike/red-userdir/
 artifacts/spike/*.log
 artifacts/spike/logs/
-# Keep the directory structure but not its contents
+
+# Runtime-generated resource files (QA runs, fixture resets, scratch)
+artifacts/spike/resources/spike-scratch/
+artifacts/spike/resources/invoice-register/
+artifacts/spike/resources/sample-tracking-file/*.bak
+artifacts/spike/resources/sample-tracking-file/conc-*.csv
+artifacts/spike/resources/sample-tracking-file/dryrun-*.csv
+artifacts/spike/resources/sample-tracking-file/gate-*.csv
+artifacts/spike/resources/sample-tracking-file/hard-*.csv
+artifacts/spike/resources/sample-tracking-file/params-*.csv
+artifacts/spike/resources/sample-tracking-file/rb*.csv
+artifacts/spike/watched/
+
+# Keep skeleton dirs and the canonical sample fixture
 !artifacts/spike/.gitkeep
 !artifacts/.gitkeep
+!artifacts/spike/resources/sample-tracking-file/clients.csv
 
 # ── OS ───────────────────────────────────────────────────────────────────
 .DS_Store
