@@ -3,7 +3,10 @@
    Effect gates: html[data-fx="reduced"] kills all decorative motion,
    html[data-fx="touch"] removes pointer-only effects. ═══ */
 
-/* ─── Brand: real logo assets, theme-switched ──────────────────────────────── */
+/* ─── Brand: real logo assets, theme-switched, no filters ─────────────────── */
+/* Light theme → metallic lockup with dark text; dark theme → same metallic
+   lockup with white text. Swap is driven purely by [data-theme]; no drop-
+   shadows, glows or filters on any state (see scripts/process_logos.py). */
 .theme-logo {
   display: inline-flex; align-items: center; position: relative; flex-shrink: 0;
 }
@@ -11,30 +14,6 @@
 .theme-logo .logo-dark { display: none; }
 [data-theme="dark"] .theme-logo .logo-dark { display: block; }
 [data-theme="dark"] .theme-logo .logo-light { display: none; }
-/* Forced-dark surface: always the white lockup regardless of theme — for
-   surfaces that stay dark in both themes (the floating-nav glass chip). */
-.theme-logo.logo-forced-dark .logo-dark { display: block; }
-.theme-logo.logo-forced-dark .logo-light { display: none; }
-[data-theme="dark"] .theme-logo.logo-forced-dark .logo-dark { display: block; }
-[data-theme="dark"] .theme-logo.logo-forced-dark .logo-light { display: none; }
-.theme-logo.logo-glow img { filter: drop-shadow(0 4px 18px rgba(120, 150, 255, 0.18)); }
-
-/* Logo chip: guarantees contrast for the mark on any surface. Slightly dark
-   tile + hairline border + faint highlight; the white mark reads clearly on
-   it in both themes. */
-.logo-chip {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
-  background: linear-gradient(155deg, #1b2230 0%, #10141d 100%);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 1px 2px rgba(2, 6, 23, 0.35);
-}
-.logo-chip .theme-logo img { filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.45)); }
-.logo-chip .theme-logo .logo-dark { display: block; }
-.logo-chip .theme-logo .logo-light { display: none; }
-[data-theme="light"] .logo-chip .theme-logo .logo-dark { display: block; }
-[data-theme="light"] .logo-chip .theme-logo .logo-light { display: none; }
-[data-theme="dark"] .theme-logo.logo-glow img { filter: drop-shadow(0 4px 22px rgba(190, 210, 255, 0.28)); }
 
 /* ─── Brand tile (inline-SVG fallback; light: blue / dark: glass-white) ───── */
 .brand-tile {
@@ -51,8 +30,6 @@
   color: #fff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 10px rgba(0, 0, 0, 0.35);
 }
-.brand-tile.brand-glow { box-shadow: 0 8px 28px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255,255,255,.3); }
-[data-theme="dark"] .brand-tile.brand-glow { box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(148, 178, 255, 0.12), inset 0 1px 0 rgba(255,255,255,.2); }
 
 /* ─── Glass material (functional layer for nav/controls, not content) ───────── */
 .glass {

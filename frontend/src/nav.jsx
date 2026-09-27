@@ -436,9 +436,7 @@ export function FloatingNav({ page, setPage, identity, isOwner, live, onSignOut 
         </button>
 
         <button className="fn-brand" aria-label="AutoStack IN — home" title="Home" onClick={() => setPage('landing')}>
-          <span className="logo-chip">
-            <ThemeLogo lockup={false} h={26} surface="dark" />
-          </span>
+          <ThemeLogo lockup h={24} />
         </button>
 
         <nav className="fn-groups" aria-label="Application">

@@ -1,16 +1,19 @@
 """Process the two AutoStack logo PNGs into web-ready assets.
 
-Inputs (user-provided, 1024x1024-ish, both with dark backgrounds):
-  - light logo: dark metallic "A" + dark-gray wordmark (for LIGHT theme surfaces)
-  - dark logo:  glowing white "A" + white wordmark (for DARK theme surfaces)
+Inputs (user-provided):
+  - light logo: metallic "A" + dark wordmark on black (for LIGHT theme surfaces)
+  - dark logo:  metallic "A" + white wordmark on near-black (for DARK theme surfaces)
 
 Outputs (frontend/src/assets/, committed to the repo):
   - autostack-mark-light.png / autostack-mark-dark.png   (mark only, transparent)
   - autostack-lockup-light.png / autostack-lockup-dark.png (mark + wordmark, transparent)
 
-Method: background = black -> alpha via luminance-derived matte for the dark
-logo (glow must stay semi-transparent, so we do proper un-premultiply against
-black), and alpha-keying for the metallic logo, then autocrop + downscale.
+Method (v3): both sources are keyed with the same crisp pipeline — floor-key
+the background, force content pixels fully opaque, and stretch their luminance
+into a readable metallic range. The dark source is a baked-in glow render, so
+its floor is higher (36) to cut the halo; the UI applies no filters at all
+(crisp by asset). Earlier attempts unmixing the dark logo against black left
+it soft and fuzzy (alpha mean ~185/255) — that approach is gone.
 """
 from PIL import Image
 import numpy as np
@@ -33,51 +36,22 @@ def autocrop(im, threshold=8):
     return im.crop(box)
 
 
-def unmix_against_black(rgb, strength):
-    """Given pixels composited over black with additive glow, recover the
-    emission color and alpha: alpha ≈ max_channel, color = rgb / max_channel.
-    `strength` scales how aggressively dim pixels become opaque."""
-    mx = rgb.max(axis=-1)
-    alpha = np.clip(mx * strength, 0, 255).astype(np.uint8)
-    safe = np.maximum(mx, 1)[..., None]
-    color = np.clip(rgb / safe * 255.0, 0, 255).astype(np.uint8)
-    return color, alpha
-
-
-def process_light():
-    """Metallic 'A' on near-black. v2: the mark must render fully opaque and
-    clearly visible — the old half-keyed alpha (mean ~95/255) made it a faint
-    smudge on glass surfaces. Floor-key the background, then make every
-    content pixel fully opaque and stretch its luminance into a readable
-    metallic range so it holds up on white cards AND mid-tone glass."""
-    im = Image.open(SRC_LIGHT).convert("RGB")
+def key_crisp(path, floor=26.0, ramp=60.0, out_lo=55.0, span=150.0):
+    """Floor-key the background, make every content pixel fully opaque, and
+    stretch its luminance into a readable metallic range [out_lo..out_lo+span].
+    Floor/ramp tune how aggressively the glow halo around the glyph is cut."""
+    im = Image.open(path).convert("RGB")
     rgb = np.array(im).astype(np.float64)
-    floor = 26.0
     lum = rgb.max(axis=-1)
-    # background keying: below floor -> transparent, smooth ramp to opaque
-    alpha_f = np.clip((lum - floor) / (60.0 - floor), 0.0, 1.0)
-    # content pixels (anything not background) become fully opaque
+    alpha_f = np.clip((lum - floor) / (ramp - floor), 0.0, 1.0)
     content = lum >= floor
     alpha_f[content] = 1.0
-    # luminance contrast stretch on content: map [floor..255] -> [55..205]
-    lo, hi = floor, 255.0
-    stretched = (rgb - lo) / max(hi - lo, 1.0)
-    stretched = np.clip(stretched, 0.0, 1.0) * 150.0 + 55.0
+    stretched = (rgb - floor) / max(255.0 - floor, 1.0)
+    stretched = np.clip(stretched, 0.0, 1.0) * span + out_lo
     out_rgb = np.where(content[..., None], stretched, rgb)
     out = np.dstack([out_rgb.clip(0, 255).astype(np.uint8),
                      (alpha_f * 255).astype(np.uint8)])
-    img = Image.fromarray(out, "RGBA")
-    return autocrop(img)
-
-
-def process_dark():
-    """White glowing lockup on black -> emission matte (glow keeps soft alpha)."""
-    im = Image.open(SRC_DARK).convert("RGB")
-    rgb = np.array(im).astype(np.float64)
-    color, alpha = unmix_against_black(rgb, strength=1.35)
-    out = np.dstack([color, alpha])
-    img = Image.fromarray(out, "RGBA")
-    return autocrop(img, threshold=6)
+    return autocrop(Image.fromarray(out, "RGBA"))
 
 
 def split_mark(im):
@@ -103,8 +77,8 @@ def split_mark(im):
     return autocrop(mark)
 
 
-light = process_light()
-dark = process_dark()
+light = key_crisp(SRC_LIGHT, floor=26.0, ramp=60.0, out_lo=55.0, span=150.0)
+dark = key_crisp(SRC_DARK, floor=36.0, ramp=110.0, out_lo=70.0, span=170.0)
 
 for name, im in (("light", light), ("dark", dark)):
     lock = im.copy()

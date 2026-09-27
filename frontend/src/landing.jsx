@@ -394,7 +394,7 @@ export function AuthScreen({ children }) {
       <AmbientBackground />
       <div className="auth-hero" style={{ position: 'relative', zIndex: 2 }}>
         <Reveal className="ah-copy">
-          <span className="ah-brand"><ThemeLogo h={40} glow /></span>
+          <span className="ah-brand"><ThemeLogo h={40} /></span>
           <h1>Automation that earns <span className="grad">trust</span>.</h1>
           <p>Your account lives on this machine — the first account administers it.
              Automations run in a sandbox and activate only after human approval.</p>
