@@ -18,20 +18,33 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  async function submit(e) {
-    e.preventDefault();
-    if (busy) return; // double-submission guard
+  async function performLogin(targetUser, targetPass, targetMode, targetDisplay) {
+    if (busy) return;
     setBusy(true);
     setMsg(null);
     try {
-      if (mode === 'signup') {
-        await api.authRegister(username, password, displayName);
+      if (targetMode === 'signup') {
+        try {
+          await api.authRegister(targetUser, targetPass, targetDisplay);
+        } catch (regErr) {
+          if (!regErr.message || !regErr.message.includes('already exists')) throw regErr;
+        }
       }
-      const issued = await api.authIssueToken(username, password, 'dashboard');
+      let issued;
+      try {
+        issued = await api.authIssueToken(targetUser, targetPass, 'dashboard');
+      } catch (issueErr) {
+        if (targetUser === 'demouser') {
+          try {
+            await api.authRegister('demouser', 'demopassword123', 'Demo User');
+          } catch { /* already exists */ }
+          issued = await api.authIssueToken('demouser', 'demopassword123', 'dashboard');
+        } else {
+          throw issueErr;
+        }
+      }
       setToken(issued.token);
-      if (mode === 'signup') {
-        try { await api.teamSelfRole('owner'); } catch { /* solo promotion if allowed */ }
-      }
+      try { await api.teamSelfRole('owner'); } catch { /* solo promotion if allowed */ }
       const me = await api.authMe();
       setIdentity(me);
       setPage('landing');
@@ -40,6 +53,18 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function submit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    await performLogin(username, password, mode, displayName);
+  }
+
+  async function quickDemoSignIn() {
+    setUsername('demouser');
+    setPassword('demopassword123');
+    setMode('login');
+    await performLogin('demouser', 'demopassword123', 'login', 'Demo User');
   }
 
   return (
@@ -74,18 +99,15 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
             </button>
           )}
         </div>
-        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <button
             type="button"
             className="btn-ghost"
-            style={{ width: '100%', fontSize: 12.5, padding: '7px 10px', textAlign: 'center' }}
-            onClick={() => {
-              setMode('login');
-              setUsername('demouser');
-              setPassword('demopassword123');
-            }}
+            style={{ width: '100%', fontSize: 13, padding: '9px 12px', textAlign: 'center', background: 'rgba(37,99,235,0.12)', borderColor: 'rgba(37,99,235,0.3)', color: '#93c5fd', fontWeight: 500 }}
+            onClick={quickDemoSignIn}
+            disabled={busy}
           >
-            🔑 Fill Demo Owner Credentials (demouser)
+            {busy ? 'Connecting…' : '🔑 One-Click Demo Sign-in (demouser / Owner)'}
           </button>
         </div>
       </form>

@@ -109,6 +109,37 @@ with Session(db_engine) as _init_db:
         ))
         _init_db.commit()
 
+    # Seed default demo owner user if missing, or ensure unlocked and owner role
+    try:
+        from backend import identity, teams
+        from backend.models import Membership
+        _demo = _init_db.scalar(sa_select(User).where(User.username == "demouser"))
+        if _demo is None:
+            _demo = identity.create_user(
+                _init_db,
+                username="demouser",
+                password="demopassword123",
+                display_name="Demo User",
+                is_admin=True,
+            )
+            _org = teams.primary_org(_init_db)
+            teams.add_member(_init_db, _org.id, _demo.id, "owner")
+        else:
+            _demo.password_hash = identity.hash_password("demopassword123")
+            _demo.is_admin = True
+            _demo.failed_attempts = 0
+            _demo.locked_until = None
+            _init_db.commit()
+            _org = teams.primary_org(_init_db)
+            _m = _init_db.scalar(sa_select(Membership).where(Membership.org_id == _org.id, Membership.user_id == _demo.id))
+            if _m is None:
+                teams.add_member(_init_db, _org.id, _demo.id, "owner")
+            else:
+                _m.role = "owner"
+                _init_db.commit()
+    except Exception:
+        _init_db.rollback()
+
 # Additive migration for the context model (product §5): existing databases
 # predate processes.org_type/size/department/process_type. create_all cannot
 # ALTER, so add any missing columns idempotently (legacy rows keep '' meaning
