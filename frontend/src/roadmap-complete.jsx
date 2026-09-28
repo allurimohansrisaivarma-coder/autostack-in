@@ -248,20 +248,43 @@ export function Connectors() {
       </div>
 
       {nodes && (
-        <Card title={`Node catalog — ${nodes.nodes.length} validated node types`}>
-          <p className="muted small" style={{ marginBottom: 10 }}>
-            The same catalog the worker's graph validator enforces at bind time — the UI can never advertise a node the executor would refuse.
-          </p>
-          <div className="node-catalog">
-            {nodes.nodes.map(n => (
-              <div key={n.type} className="node-chip" title={n.permission ? `permission: ${n.permission}` : 'no special permission'}>
-                <span className="node-type mono">{n.type}</span>
-                <span className="node-group">{n.group}</span>
-                {n.permission && <span className="node-perm" aria-label={`requires ${n.permission}`}>🔒</span>}
-              </div>
-            ))}
-          </div>
-        </Card>
+        <>
+          <Card title={`Node catalog — ${nodes.nodes.length} validated node types`}>
+            <p className="muted small" style={{ marginBottom: 10 }}>
+              The same catalog the worker's graph validator enforces at bind time — the UI can never advertise a node the executor would refuse.
+              Grouped by the governed path: <strong>Input</strong> → <strong>Process</strong> → <strong>Human gate</strong> → <strong>Output</strong>.
+            </p>
+            {['Input', 'Process', 'Human gate', 'Output'].map(stage => {
+              const inStage = nodes.nodes.filter(n => (n.stage || 'Process') === stage);
+              if (!inStage.length) return null;
+              return (
+                <div key={stage} style={{ marginBottom: 12 }}>
+                  <div className="muted small" style={{ marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{stage}</div>
+                  <div className="node-catalog">
+                    {inStage.map(n => (
+                      <div key={n.type} className="node-chip" title={n.permission ? `permission: ${n.permission}` : 'no special permission'}>
+                        <span className="node-type mono">{n.type}</span>
+                        <span className="node-group">{n.group}</span>
+                        {n.status && n.status !== 'supported' && <span className={`conn-status ${n.status}`}>{n.status}</span>}
+                        {n.permission && <span className="node-perm" aria-label={`requires ${n.permission}`}>🔒</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+          {nodes.triggers && nodes.triggers.length > 0 && (
+            <Card title="Triggers — how runs start">
+              {nodes.triggers.map(t => (
+                <Row key={t.type}>
+                  <div><strong>{t.label}</strong> <span className="muted small">{t.note}</span></div>
+                  <span className={`conn-status ${t.status}`}>{t.status}</span>
+                </Row>
+              ))}
+            </Card>
+          )}
+        </>
       )}
 
       {ai && (

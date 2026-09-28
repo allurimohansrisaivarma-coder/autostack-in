@@ -247,14 +247,14 @@ function OrgProfileCard({ isOwner }) {
       {result && <div className="muted">{result}</div>}
     </Card>
   );
-}
-
-function OrganizationSection({ identity, setPage }) {
+}function OrganizationSection({ identity, setPage }) {
   const caps = identity && identity.capabilities;
   const isOwner = identity && identity.role === 'owner';
   const [name, setName] = useState('');
   const [result, setResult] = useState(null);
   const [tier, setTier] = useState(null);
+  const [converting, setConverting] = useState(false);
+  const [convMsg, setConvMsg] = useState(null);
 
   async function switchTier(t) {
     setResult(null);
@@ -265,18 +265,58 @@ function OrganizationSection({ identity, setPage }) {
     } catch (err) { setResult(err.message); }
   }
 
+  async function convertToTeam() {
+    setConverting(true);
+    setConvMsg(null);
+    try {
+      const out = await api.convertToTeam(name || undefined);
+      setTier(out.capabilities);
+      setConvMsg(out.note || 'Converted to team.');
+    } catch (e) { setConvMsg(e.message); }
+    setConverting(false);
+  }
+
+  const currentTier = (tier && tier.tier) || (caps && caps.tier) || 'solo';
+  const isSolo = currentTier === 'solo';
+
   return (
     <div className="settings-body">
       <SectionHead title="Organization" sub={isOwner
         ? 'Tier and org name — enforced server-side.'
         : 'Read-only: changing the tier requires the owner role.'} />
-      <Card title="Account & tier">
-        <p className="muted">The tier gates real capabilities on the worker. Solo is the free default; other tiers model what a paid plan unlocks.</p>
+      <Card title={isSolo ? 'Plan: Solo' : `Plan: ${currentTier}`}>
+        {isSolo ? (
+          <>
+            <p className="muted">
+              Solo is your personal workspace — full owner access for one member.
+              Converting to <strong>Team</strong> unlocks members &amp; invitations,
+              paired runners, the private registry, and retention administration.
+              You stay the owner; nothing else changes.
+            </p>
+            {isOwner ? (
+              <button className="btn primary" onClick={convertToTeam} disabled={converting}>
+                {converting ? 'Converting…' : 'Convert to Team plan'}
+              </button>
+            ) : (
+              <p className="muted">Only the workspace owner can convert the plan.</p>
+            )}
+            {convMsg && <div className="token-reveal" role="status">{convMsg}</div>}
+          </>
+        ) : (
+          <p className="muted">
+            This workspace is on the <strong>{currentTier}</strong> plan — members, invitations,
+            and shared capabilities are unlocked in <button className="link" onClick={() => setPage('teams')}>Members &amp; organization</button>.
+          </p>
+        )}
+      </Card>
+      <Card title="All tiers (owner)">
+        <p className="muted">The tier gates real capabilities on the worker. Other tiers model what a paid plan unlocks.</p>
         <div className="tier-buttons">
           {['solo', 'team', 'enterprise', 'government', 'developer'].map(t => (
-            <button key={t} className={`chip ${((tier && tier.tier) || (caps && caps.tier)) === t ? 'on' : ''}`}
+            <button key={t} className={`chip ${currentTier === t ? 'on' : ''}`}
                     onClick={() => switchTier(t)} disabled={!isOwner}>{t}</button>
-          ))}
+          ))
+          }
         </div>
         <div className="field">
           <input placeholder="Organization name (optional)" value={name} onChange={e => setName(e.target.value)} disabled={!isOwner} />

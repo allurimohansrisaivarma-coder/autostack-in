@@ -567,7 +567,8 @@ def test_node_catalog_mirrors_validator(client):
     types = {n["type"] for n in body["nodes"]}
     assert {"file.read_table", "data.filter", "data.aggregate", "file.update_rows",
             "file.copy", "file.archive", "rows.append", "rows.soft_delete",
-            "draft.create", "notify.desktop", "control.branch", "approval.gate"} <= types
+            "draft.create", "notify.desktop", "control.branch", "approval.gate",
+            "data.transform", "control.merge", "control.wait", "node.http"} <= types
     # file ops are write-permission nodes, grouped for the capability surface
     fcopy = next(n for n in body["nodes"] if n["type"] == "file.copy")
     assert fcopy["permission"] == "write-target" and fcopy["group"] == "File ops"
@@ -578,6 +579,159 @@ def test_node_catalog_mirrors_validator(client):
     assert gate["permission"] == "activate"
     agg = next(n for n in body["nodes"] if n["type"] == "data.aggregate")
     assert agg["group"] == "Transform"
+    # Opal-style stage clarity + honest statuses on every node
+    assert all(n.get("stage") in {"Input", "Process", "Human gate", "Output"}
+               for n in body["nodes"])
+    assert all(n.get("status") in {"supported", "limited", "planned", "unavailable"}
+               for n in body["nodes"])
+    http = next(n for n in body["nodes"] if n["type"] == "node.http")
+    assert http["status"] == "limited"  # allowlisted hosts only — never "supported"
+    gate2 = next(n for n in body["nodes"] if n["type"] == "approval.gate")
+    assert gate2["stage"] == "Human gate"
+    # trigger surface is honest: manual/schedule/file/webhook real, agents refused
+    trig = {t["type"]: t for t in body["triggers"]}
+    assert trig["manual"]["status"] == "supported"
+    assert trig["schedule"]["status"] == "supported"
+    assert trig["file"]["status"] == "supported"
+    assert trig["webhook"]["status"] == "supported"
+    assert trig["model_agent"]["status"] == "unavailable"
+
+
+# ── n8n/Opal expansion: transform, merge, wait, allowlisted HTTP ───────────────
+
+def test_data_transform_is_plan_scoped(client):
+    """data.transform sets/renames fields; a set targeting a field outside the
+    approved plan scope is a client error, not a silent pass-through. A raw
+    workflow has no plan, so only the client-id field is in scope."""
+    graph = {"nodes": [
+        {"id": "r", "type": "file.read_table", "params": {"alias": "sample-tracking-file"}},
+        {"id": "t", "type": "data.transform",
+         "params": {"set": "ClientID=tagged", "rename": "Name=AccountName"}},
+    ], "edges": [{"from": "r", "to": "t"}]}
+    wf = _post(client, "/api/workflows", {"id": f"wf-tr-{uuid.uuid4().hex[:6]}",
+                                          "name": "transform", "graph": graph})
+    assert wf.status_code == 200, wf.text
+    wid = wf.json()["workflow_id"]
+    r = _post(client, "/api/runs", {"workflow_id": wid, "run_date": "2026-09-20",
+                                    "filename": "clients.csv"})
+    assert r.status_code == 200, r.text
+    # out-of-scope field refused at run time (400, client-caused)
+    graph2 = {"nodes": [
+        {"id": "r", "type": "file.read_table", "params": {"alias": "sample-tracking-file"}},
+        {"id": "t", "type": "data.transform", "params": {"set": "NotAPlanField=x"}},
+    ], "edges": [{"from": "r", "to": "t"}]}
+    wf2 = _post(client, "/api/workflows", {"id": f"wf-tr-{uuid.uuid4().hex[:6]}",
+                                           "name": "transform-bad", "graph": graph2})
+    assert wf2.status_code == 200
+    r2 = _post(client, "/api/runs", {"workflow_id": wf2.json()["workflow_id"],
+                                     "run_date": "2026-09-20", "filename": "clients.csv"})
+    assert r2.status_code == 400, r2.text
+
+
+def test_control_merge_unions_branch_rows(client):
+    """control.merge joins rows that arrived from each incoming edge (n8n Merge):
+    two filter branches over the same source produce a union table downstream."""
+    graph = {"nodes": [
+        {"id": "r", "type": "file.read_table", "params": {"alias": "sample-tracking-file"}},
+        {"id": "f1", "type": "data.filter", "params": {"from": "r", "where": "row.Status == 'Follow-up due'"}},
+        {"id": "f2", "type": "data.filter", "params": {"from": "r", "where": "True"}},
+        {"id": "m", "type": "control.merge", "params": {}},
+    ], "edges": [{"from": "r", "to": "f1"}, {"from": "r", "to": "f2"},
+                {"from": "f1", "to": "m"}, {"from": "f2", "to": "m"}]}
+    wf = _post(client, "/api/workflows",
+               {"id": f"wf-mg-{uuid.uuid4().hex[:6]}", "name": "merge", "graph": graph})
+    assert wf.status_code == 200, wf.text
+    wid = wf.json()["workflow_id"]
+    r = _post(client, "/api/runs", {"workflow_id": wid, "run_date": "2026-09-20",
+                                    "filename": "clients.csv"})
+    assert r.status_code == 200, r.text
+    # merge node passed and recorded the branch join
+    nodes_r = client.get(f"/api/runs/{r.json()['run_id']}/nodes", headers=SERVICE).json()["nodes"]
+    merge_rec = next(n for n in nodes_r if n["node"].startswith("m:"))
+    assert merge_rec["status"] == "passed", merge_rec
+
+
+def test_control_wait_bounds_enforced(client):
+    """control.wait pauses at most 30 s (catalog + executor); 999 s is refused at
+    bind time — a graph can never stall a run indefinitely."""
+    graph = {"nodes": [{"id": "w", "type": "control.wait", "params": {"seconds": 999}}], "edges": []}
+    r = _post(client, "/api/workflows", {"id": f"wf-wt-{uuid.uuid4().hex[:6]}",
+                                         "name": "wait", "graph": graph})
+    assert r.status_code == 422, r.text
+    graph_ok = {"nodes": [{"id": "w", "type": "control.wait", "params": {"seconds": 1}}], "edges": []}
+    wf = _post(client, "/api/workflows", {"id": f"wf-wt-{uuid.uuid4().hex[:6]}",
+                                          "name": "wait-ok", "graph": graph_ok})
+    assert wf.status_code == 200, wf.text
+    r = _post(client, "/api/runs", {"workflow_id": wf.json()["workflow_id"],
+                                    "run_date": "2026-09-20", "filename": "clients.csv"})
+    assert r.status_code == 200, r.text
+
+
+def test_node_http_requires_workflow_allowlist(client, monkeypatch):
+    """node.http is refused at bind time unless the host is on BOTH the
+    deployment allowlist and the workflow's own static allowlist. The live call
+    is faked: unit tests stay hermetic (no real network)."""
+    host = "127.0.0.1"
+    # workflow WITHOUT the allowlist → bind refused
+    bad = {"nodes": [{"id": "h", "type": "node.http",
+                     "params": {"host": host, "method": "GET", "path": "/api/health"}}],
+           "edges": []}
+    r = _post(client, "/api/workflows", {"id": f"wf-ht-{uuid.uuid4().hex[:6]}",
+                                         "name": "http-bad", "graph": bad})
+    assert r.status_code == 422, r.text
+    # workflow WITH the allowlist → binds; the run performs the (faked) call
+    good = {"http_allow_hosts": [host], "nodes": [
+        {"id": "h", "type": "node.http",
+         "params": {"host": host, "method": "GET", "path": "/api/health"}}], "edges": []}
+    wf = _post(client, "/api/workflows", {"id": f"wf-ht-{uuid.uuid4().hex[:6]}",
+                                          "name": "http-ok", "graph": good})
+    assert wf.status_code == 200, wf.text
+
+    import urllib.request as _uq
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, n):
+            return b'{"ok": true}'
+
+    seen = {}
+
+    def fake_urlopen(req, timeout=0):
+        seen["url"] = req.full_url
+        seen["method"] = req.get_method()
+        seen["timeout"] = timeout
+        return _FakeResp()
+
+    monkeypatch.setattr(_uq, "urlopen", fake_urlopen)
+    r = _post(client, "/api/runs", {"workflow_id": wf.json()["workflow_id"],
+                                    "run_date": "2026-09-20", "filename": "clients.csv"})
+    assert r.status_code == 200, r.text
+    assert seen["url"] == f"http://{host}/api/health" and seen["method"] == "GET"
+    nodes_r = client.get(f"/api/runs/{r.json()['run_id']}/nodes", headers=SERVICE).json()["nodes"]
+    rec = next(n for n in nodes_r if n["node"].startswith("h:"))
+    assert rec["status"] == "passed", rec
+
+    # network failure (refused/unreachable) is a CLIENT error: clean 400, not 500
+    def refused_urlopen(req, timeout=0):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(_uq, "urlopen", refused_urlopen)
+    r2 = _post(client, "/api/runs", {"workflow_id": wf.json()["workflow_id"],
+                                     "run_date": "2026-09-21", "filename": "clients.csv"})
+    assert r2.status_code == 400, r2.text
+    assert "node.http call failed" in r2.json()["detail"]["error"]
+    # arbitrary host refused even with an allowlist present
+    evil = {"http_allow_hosts": ["internal.example"], "nodes": [
+        {"id": "h", "type": "node.http",
+         "params": {"host": "internal.example", "method": "GET", "path": "/"}}], "edges": []}
+    r = _post(client, "/api/workflows", {"id": f"wf-ht-{uuid.uuid4().hex[:6]}",
+                                         "name": "http-evil", "graph": evil})
+    assert r.status_code == 422, r.text
 
 
 def test_connectors_measured_not_stickered(client):
@@ -590,8 +744,8 @@ def test_connectors_measured_not_stickered(client):
             "webhook_in", "browser", "http_request", "email_in"} == set(items.keys())
     # email is never available (product promise: drafts only)
     assert items["email"]["status"] == "unavailable"
-    # outbound HTTP is hard-blocked by the sandbox design — never "supported"
-    assert items["http_request"]["status"] == "unavailable"
+    # outbound HTTP is limited to the workflow's static allowlist — never "supported"
+    assert items["http_request"]["status"] == "limited"
     # AI status reflects the real environment (mock provider -> limited)
     assert items["ai_gemini"]["status"] == ("supported" if items["ai_gemini"].get("detail") == "" else "limited")
     # every connector states both boundaries

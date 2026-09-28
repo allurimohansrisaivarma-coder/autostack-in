@@ -92,8 +92,9 @@ def get_or_create_org(db: Session) -> Org:
     return org
 
 
-def get_capabilities(db: Session) -> dict:
-    org = get_or_create_org(db)
+def _caps_for(org: Org) -> dict:
+    """Capabilities as they apply to THIS org (personal-org model: each
+    workspace resolves its own tier, not merely the first row in the table)."""
     caps = capabilities_for_tier(org.tier)
     caps["tier"] = org.tier
     caps["org_id"] = org.id
@@ -102,16 +103,24 @@ def get_capabilities(db: Session) -> dict:
     return caps
 
 
-def set_tier(db: Session, tier: str, org_name: str | None = None) -> dict:
+def get_capabilities(db: Session) -> dict:
+    return _caps_for(get_or_create_org(db))
+
+
+def set_tier(db: Session, tier: str, org_name: str | None = None, *, org: Org | None = None) -> dict:
+    """Set the tier on `org` (the caller's workspace when omitted). Scoped for
+    the personal-org model: an owner converts THEIR org, not merely the first
+    row in the table — and the returned capabilities describe the converted
+    workspace, not some other one."""
     if tier not in TIERS:
         raise ValueError(f"unknown tier: {tier}")
-    org = get_or_create_org(db)
+    org = org if org is not None else get_or_create_org(db)
     org.tier = tier
     org.local_only = (tier == "government")
     if org_name:
         org.name = org_name[:160]
     db.commit()
-    return get_capabilities(db)
+    return _caps_for(org)
 
 
 def check(db: Session, capability: str) -> tuple[bool, dict, str]:

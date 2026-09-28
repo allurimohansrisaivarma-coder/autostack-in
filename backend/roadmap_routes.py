@@ -21,9 +21,9 @@ from sqlalchemy.orm import Session
 from backend import entitlements, identity, orchestration, teams
 from backend.engine.catalog import CATALOG
 from backend.db import SessionLocal
-from backend.models import (Approval, AuditEntry, Draft, Membership, Process,
-                            RegistryEvent, RegistryImport, Run, Setting, User,
-                            WorkflowVersion)
+from backend.models import (Approval, AuditEntry, Draft, Membership, Org, Process,
+                            RegistryEvent, RegistryImport, RoleRequest, Run,
+                            Setting, User, WorkflowVersion)
 from backend.security import audit as audit_mod
 from backend.security.tokens import get_expected_token, require_writer
 
@@ -47,15 +47,31 @@ class _Principal:
         self.kind = kind
         self.user = user
         self.role = role
+        self._org = None
+        self._org_is_shared = False
 
     @property
     def is_admin(self) -> bool:
-        return self.kind == "service" or bool(self.user and self.user.is_admin) or self.role == "owner"
+        """Machine-level administration (workflow delete, publish, processes…).
+        Personal-org owners are owners of THEIR workspace only — they must not
+        administer the machine; only the shared workspace's owner (or the
+        machine-admin flag / service principal) counts here."""
+        return (self.kind == "service" or bool(self.user and self.user.is_admin)
+                or (self.role == "owner" and self._org_is_shared))
 
 
 def _bearer(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
     return auth[7:].strip() if auth.startswith("Bearer ") else ""
+
+
+def _caller_org(db: Session, user: User):
+    """The org this principal's role comes from: membership in the shared
+    workspace wins; otherwise the user's own personal workspace (signup rule:
+    unaffiliated accounts own one). Falls back to the shared workspace for
+    legacy provisioned accounts so every existing route keeps working."""
+    org = teams.user_org(db, user)
+    return org if org is not None else teams.primary_org(db)
 
 
 def require_principal(request: Request, db: Session = Depends(get_db)) -> _Principal:
@@ -67,7 +83,7 @@ def require_principal(request: Request, db: Session = Depends(get_db)) -> _Princ
     user = identity.user_for_token(db, token)
     if user is None:
         raise HTTPException(status_code=401, detail={"error": "invalid or revoked token"})
-    org = teams.primary_org(db)
+    org = _caller_org(db, user)
     m = db.scalar(select(Membership).where(Membership.org_id == org.id,
                                            Membership.user_id == user.id))
     if m is not None:
@@ -79,7 +95,10 @@ def require_principal(request: Request, db: Session = Depends(get_db)) -> _Princ
         # The old observer fallback contradicted registration and locked every
         # mutating route behind a false 403 for provisioned accounts.
         role = "operator"
-    return _Principal("user", user, role)
+    p = _Principal("user", user, role)
+    p._org = org
+    p._org_is_shared = org is not None and org.id == teams.primary_org(db).id
+    return p
 
 
 def admin_guard(principal: _Principal = Depends(require_principal)) -> _Principal:
@@ -88,12 +107,28 @@ def admin_guard(principal: _Principal = Depends(require_principal)) -> _Principa
     return principal
 
 
+def owner_guard(principal: _Principal = Depends(require_principal)) -> _Principal:
+    """Organization-owner gate for MEMBER/tier administration. Deliberately
+    stricter than admin_guard: a machine admin flag alone (or the operator
+    fallback) must never allow role changes over other people's workspaces.
+    The service principal keeps owner-equivalent rights for QA/ops tooling."""
+    if principal.kind == "service" or principal.role == "owner":
+        return principal
+    raise HTTPException(status_code=403, detail={"error": "organization owner role required",
+                                                 "how_to_unlock": "an owner must change roles, "
+                                                 "approve role requests, or convert the plan"})
+
+
 # ── Phase A: identity ────────────────────────────────────────────────────────
 
 class RegisterBody(BaseModel):
     username: str
     password: str
     display_name: str = ""
+    # Signup "Requested role" (optional): stored as a PENDING request only —
+    # never a grant. 'owner' is refused outright (no self-elevation), and any
+    # injected role/is_admin fields outside this model are ignored by Pydantic.
+    requested_role: str = "operator"
 
 
 class LoginBody(BaseModel):
@@ -107,17 +142,51 @@ class TokenIssueBody(BaseModel):
     name: str = "default"
 
 
+VALID_REQUESTED_ROLES = ("observer", "operator", "approver")
+
+
 @router.post("/auth/register")
 def auth_register(body: RegisterBody, db: Session = Depends(get_db)):
     try:
         user = identity.create_user(db, body.username, body.password, body.display_name)
-        org = teams.primary_org(db)
-        # Registration grants OPERATOR unless this is the very first account
-        # (which administers the machine). Observers are created deliberately
-        # by an owner via Members & organization — never by default.
-        teams.add_member(db, org.id, user.id, "owner" if user.is_admin else "operator")
+        # Affiliation rules (signup upgrade):
+        #  - The very first account administers the machine → owner of the shared
+        #    workspace (unchanged legacy behavior).
+        #  - An unaffiliated later signup gets a PERSONAL org and is its owner —
+        #    full feature access on their own workspace.
+        #  - Joining an existing org (invitation / added by an owner later) never
+        #    auto-grants owner; the invitation's role applies at accept time.
+        #    Here a fresh signup has no memberships by definition, so it is the
+        #    personal-org branch.
+        # create_user sets is_admin exactly when this is the machine's first
+        # account: it admins the SHARED workspace. Later signups own their own
+        # PERSONAL workspace (teams.ensure_personal_org) — same full access,
+        # isolated by default.
+        org = teams.primary_org(db) if user.is_admin else teams.ensure_personal_org(db, user)
+        granted_role = "owner"
+        teams.add_member(db, org.id, user.id, "owner")
+        requested = None
+        if body.requested_role in VALID_REQUESTED_ROLES and body.requested_role != granted_role:
+            # Pending role request against the SHARED workspace (where other
+            # people work); refused outright for 'owner' — no self-elevation.
+            rr = RoleRequest(id=secrets.token_hex(12), user_id=user.id,
+                             requested_role=body.requested_role, status="pending",
+                             note=f"requested at signup for {teams.primary_org(db).id}",
+                             created_at=datetime.now(timezone.utc))
+            db.add(rr)
+            db.commit()
+            requested = {"id": rr.id, "requested_role": rr.requested_role,
+                         "status": "pending",
+                         "note": "stored as a pending request; only an owner can approve it"}
+        from backend.security import audit as audit_mod
+        audit_mod.append(db, "auth.registered", {"user_id": user.id, "username": user.username,
+                                                 "org_id": org.id, "org_tier": org.tier,
+                                                 "granted_role": granted_role,
+                                                 "requested_role": requested["requested_role"] if requested else None})
+        db.commit()
         return {"user_id": user.id, "username": user.username, "is_admin": user.is_admin,
-                "role": "owner" if user.is_admin else "operator"}
+                "role": granted_role, "org": {"id": org.id, "name": org.name, "tier": org.tier},
+                "requested_role": requested}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
@@ -165,7 +234,13 @@ def auth_revoke_token(token_id: str, request: Request, db: Session = Depends(get
 @router.get("/auth/me")
 def auth_me(request: Request, db: Session = Depends(get_db)):
     principal = require_principal(request, db)
-    caps = entitlements.get_capabilities(db)
+    # Personal-org model: capabilities resolve from the caller's OWN workspace
+    # (shared-workspace membership wins, else the personal org) — not merely the
+    # first org row, which may be someone else's workspace.
+    if principal.kind == "user" and principal._org is not None:
+        caps = entitlements._caps_for(principal._org)
+    else:
+        caps = entitlements.get_capabilities(db)
     user = None
     if principal.kind == "user":
         user = {"user_id": principal.user.id, "username": principal.user.username,
@@ -184,11 +259,16 @@ def node_catalog():
     """The workflow node catalog — the SAME source of truth the graph validator
     (engine/catalog.py) enforces at bind time. Powers the Create Automation
     capability surface and the Connectors page; the UI can never advertise a
-    node the executor would refuse. Public like /org/catalog (pre-login wizard)."""
+    node the executor would refuse. Public like /org/catalog (pre-login wizard).
+
+    Opal-inspired stage clarity: every node is tagged Input / Process /
+    Human gate / Output so workflow building follows the governed path, plus an
+    honest status (supported / limited / planned / unavailable)."""
     groups = {
         "file.read_table": "Read",
         "data.filter": "Transform",
         "data.aggregate": "Transform",
+        "data.transform": "Transform",
         "file.update_rows": "Write",
         "file.copy": "File ops",
         "file.archive": "File ops",
@@ -197,13 +277,42 @@ def node_catalog():
         "draft.create": "Write",
         "notify.desktop": "Notify",
         "control.branch": "Control flow",
+        "control.merge": "Control flow",
+        "control.wait": "Control flow",
         "approval.gate": "Governance",
+        "node.http": "HTTP",
+    }
+    # Opal-style governed path: what starts the run -> what transforms it ->
+    # where a human decides -> what the run produces.
+    stages = {
+        "file.read_table": "Input",
+        "data.filter": "Process",
+        "data.aggregate": "Process",
+        "data.transform": "Process",
+        "file.update_rows": "Process",
+        "file.copy": "Process",
+        "file.archive": "Process",
+        "rows.append": "Process",
+        "rows.soft_delete": "Process",
+        "control.branch": "Process",
+        "control.merge": "Process",
+        "control.wait": "Process",
+        "node.http": "Process",
+        "approval.gate": "Human gate",
+        "draft.create": "Output",
+        "notify.desktop": "Output",
+    }
+    # Honest capability status per node (mirrors the connectors inventory).
+    statuses = {
+        "node.http": "limited",   # only allowlisted local hosts; no arbitrary URLs
     }
     return {
         "nodes": [
             {
                 "type": spec.type,
                 "group": groups.get(spec.type, "Other"),
+                "stage": stages.get(spec.type, "Process"),
+                "status": statuses.get(spec.type, "supported"),
                 "required_params": list(spec.required),
                 "optional_params": [p for p in spec.params if p not in spec.required],
                 "outputs": list(spec.outputs),
@@ -211,6 +320,21 @@ def node_catalog():
                 "errors": list(spec.errors),
             }
             for spec in CATALOG.values()
+        ],
+        # n8n-style trigger surface: what can START a run. Manual/scheduled runs
+        # are real today; file-arrival fires on saved-file events; inbound
+        # webhooks are secret-authenticated. Model/agent triggers do not exist.
+        "triggers": [
+            {"type": "manual", "label": "Run now", "status": "supported",
+             "note": "start any approved workflow from the UI or API"},
+            {"type": "schedule", "label": "Schedule", "status": "supported",
+             "note": "evidence-gated recurrence (real observed dates or explicit confirmation)"},
+            {"type": "file", "label": "File arrival", "status": "supported",
+             "note": "fires when a watched allowlisted file event settles (alias + action match)"},
+            {"type": "webhook", "label": "Webhook", "status": "supported",
+             "note": "inbound POST with the trigger's secret header, rate-limited and audited"},
+            {"type": "model_agent", "label": "AI agent", "status": "unavailable",
+             "note": "by design: no open-ended agent tool-calling; generation stays inside the approved plan"},
         ],
         "note": "validated at bind time by the worker; the UI only mirrors this catalog",
     }
@@ -297,10 +421,12 @@ class TierBody(BaseModel):
     org_name: str | None = None
 
 
-@router.post("/org/tier", dependencies=[Depends(admin_guard)])
-def org_set_tier(body: TierBody, db: Session = Depends(get_db)):
+@router.post("/org/tier", dependencies=[Depends(owner_guard)])
+def org_set_tier(body: TierBody, principal: _Principal = Depends(require_principal),
+                 db: Session = Depends(get_db)):
     try:
-        caps = entitlements.set_tier(db, body.tier, body.org_name)
+        caps = entitlements.set_tier(db, body.tier, body.org_name,
+                                     org=(principal._org if principal.kind == "user" else None))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
     from backend.security import audit as audit_mod
@@ -327,6 +453,11 @@ class RoleBody(BaseModel):
     role: str
 
 
+class DecisionBody(BaseModel):
+    approve: bool
+    note: str = ""
+
+
 class InvitationBody(BaseModel):
     role: str = "operator"
     ttl_hours: int = 72
@@ -351,18 +482,22 @@ class AttachBody(BaseModel):
 
 
 @router.get("/team/members", dependencies=[Depends(require_principal)])
-def team_members(db: Session = Depends(get_db)):
-    org = teams.primary_org(db)
+def team_members(principal: _Principal = Depends(require_principal),
+                 db: Session = Depends(get_db)):
+    # Personal-org model: list the caller's workspace (their personal org by
+    # default); the service principal keeps the shared-workspace view.
+    org = principal._org or teams.primary_org(db)
     return {"org": {"id": org.id, "name": org.name, "tier": org.tier},
             "members": teams.members(db, org.id)}
 
 
-@router.post("/team/members", dependencies=[Depends(admin_guard)])
-def team_add_member(body: MemberBody, db: Session = Depends(get_db)):
+@router.post("/team/members", dependencies=[Depends(owner_guard)])
+def team_add_member(body: MemberBody, principal: _Principal = Depends(require_principal),
+                    db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.username == body.username.strip().lower()))
     if user is None:
         raise HTTPException(status_code=404, detail={"error": "no local user with that username"})
-    org = teams.primary_org(db)
+    org = principal._org or teams.primary_org(db)
     caps = entitlements.get_capabilities(db)
     if len(teams.members(db, org.id)) >= int(caps.get("members", 1)) and user.id not in {m["user_id"] for m in teams.members(db, org.id)}:
         raise HTTPException(status_code=403, detail={
@@ -375,21 +510,28 @@ def team_add_member(body: MemberBody, db: Session = Depends(get_db)):
     return {"membership_id": m.id, "user_id": m.user_id, "role": m.role}
 
 
-@router.post("/team/members/{membership_id}/role", dependencies=[Depends(admin_guard)])
-def team_set_role(membership_id: str, body: RoleBody, db: Session = Depends(get_db)):
-    org = teams.primary_org(db)
+@router.post("/team/members/{membership_id}/role", dependencies=[Depends(owner_guard)])
+def team_set_role(membership_id: str, body: RoleBody, principal: _Principal = Depends(require_principal),
+                  db: Session = Depends(get_db)):
+    org = principal._org or teams.primary_org(db)
     try:
         ok = teams.set_role(db, org.id, membership_id, body.role)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc)}) from exc
     if not ok:
         raise HTTPException(status_code=404, detail={"error": "membership not found"})
+    from backend.security import audit as audit_mod
+    who = principal.user.username if principal.user else "service"
+    audit_mod.append(db, "team.role_changed", {"membership_id": membership_id,
+                                               "role": body.role, "by": who})
+    db.commit()
     return {"updated": True, "role": body.role}
 
 
-@router.delete("/team/members/{membership_id}", dependencies=[Depends(admin_guard)])
-def team_remove_member(membership_id: str, db: Session = Depends(get_db)):
-    org = teams.primary_org(db)
+@router.delete("/team/members/{membership_id}", dependencies=[Depends(owner_guard)])
+def team_remove_member(membership_id: str, principal: _Principal = Depends(require_principal),
+                       db: Session = Depends(get_db)):
+    org = principal._org or teams.primary_org(db)
     try:
         ok = teams.remove_member(db, org.id, membership_id)
     except ValueError as exc:
@@ -400,15 +542,16 @@ def team_remove_member(membership_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/team/invitations", dependencies=[Depends(require_principal)])
-def team_list_invitations(db: Session = Depends(get_db)):
-    org = teams.primary_org(db)
+def team_list_invitations(principal: _Principal = Depends(require_principal),
+                          db: Session = Depends(get_db)):
+    org = principal._org or teams.primary_org(db)
     return {"invitations": teams.list_invitations(db, org.id)}
 
 
-@router.post("/team/invitations", dependencies=[Depends(admin_guard)])
+@router.post("/team/invitations", dependencies=[Depends(owner_guard)])
 def team_create_invitation(body: InvitationBody, principal: _Principal = Depends(require_principal),
                            db: Session = Depends(get_db)):
-    org = teams.primary_org(db)
+    org = principal._org or teams.primary_org(db)
     try:
         inv, token = teams.create_invitation(db, org.id, body.role,
                                              principal.user.id if principal.user else "service",
@@ -431,7 +574,7 @@ def team_accept_invitation(body: AcceptBody, request: Request, db: Session = Dep
     return {"membership_id": m.id, "role": m.role}
 
 
-@router.delete("/team/invitations/{invitation_id}", dependencies=[Depends(admin_guard)])
+@router.delete("/team/invitations/{invitation_id}", dependencies=[Depends(owner_guard)])
 def team_revoke_invitation(invitation_id: str, db: Session = Depends(get_db)):
     org = teams.primary_org(db)
     if not teams.revoke_invitation(db, org.id, invitation_id):
@@ -439,9 +582,115 @@ def team_revoke_invitation(invitation_id: str, db: Session = Depends(get_db)):
     return {"revoked": True}
 
 
+# ── Signup role requests: pending elevations, decided ONLY by an owner ────────
+
+@router.get("/team/role-requests", dependencies=[Depends(require_principal)])
+def role_requests_list(request: Request, db: Session = Depends(get_db)):
+    """Owners see the full pending queue; other roles see their own requests.
+    Decisions live only with owners — this endpoint never mutates anything."""
+    from backend.models import RoleRequest
+    principal = require_principal(request, db)
+    q = db.query(RoleRequest).order_by(RoleRequest.created_at.desc())
+    # Personal-org model: the full pending queue belongs to the SHARED
+    # workspace's owner (and the service principal). A personal-org owner sees
+    # only their OWN requests — never another workspace's queue.
+    shared_id = teams.primary_org(db).id
+    is_shared_owner = (principal.kind == "user" and principal.role == "owner"
+                       and principal._org is not None and principal._org.id == shared_id)
+    can_decide_all = principal.kind == "service" or is_shared_owner
+    if can_decide_all:
+        pass  # full queue
+    else:
+        q = q.filter(RoleRequest.user_id == (principal.user.id if principal.user else ""))
+    out = []
+    for r in q.limit(100).all():
+        u = db.get(User, r.user_id)
+        out.append({"id": r.id, "username": u.username if u else "(deleted)",
+                    "requested_role": r.requested_role, "status": r.status,
+                    "decided_by": r.decided_by, "created_at": r.created_at.isoformat() if r.created_at else None,
+                    # The UI mirrors this; the decide endpoint re-checks server-side.
+                    "decidable": bool(can_decide_all and r.status == "pending"
+                                      and r.requested_role in VALID_REQUESTED_ROLES)})
+    return {"role_requests": out}
+
+
+@router.post("/team/role-requests/{request_id}/decide", dependencies=[Depends(owner_guard)])
+def role_request_decide(request_id: str, body: DecisionBody,
+                        principal: _Principal = Depends(require_principal),
+                        db: Session = Depends(get_db)):
+    """Owner decision on a pending signup role request. The grant lands in the
+    SHARED workspace at the requested role (never 'owner'); the request row
+    records who decided. This is the only path from 'requested' to 'granted'."""
+    from backend.models import RoleRequest
+    rr = db.get(RoleRequest, request_id)
+    if rr is None:
+        raise HTTPException(status_code=404, detail={"error": "role request not found"})
+    if rr.status != "pending":
+        raise HTTPException(status_code=409, detail={"error": f"role request already {rr.status}"})
+    if rr.requested_role not in VALID_REQUESTED_ROLES:
+        raise HTTPException(status_code=422, detail={"error": "requested role is not grantable"})
+    who = principal.user.username if principal.user else "service"
+    rr.status = "approved" if body.approve else "rejected"
+    rr.decided_by = who[:80]
+    rr.decided_at = datetime.now(timezone.utc)
+    granted_role = None
+    if body.approve:
+        # Grant in the workspace the request TARGETS (the deciding owner's org,
+        # matched against the note) — not blindly the first org row.
+        org = None
+        for candidate in db.query(Org).all():
+            if candidate.id in (rr.note or ""):
+                org = candidate
+                break
+        if org is None:
+            org = teams.primary_org(db)
+        # The deciding owner must own the TARGET workspace: a personal-org owner
+        # cannot approve requests aimed at the shared workspace (or vice versa).
+        if principal.kind == "user" and (principal._org is None or principal._org.id != org.id):
+            raise HTTPException(status_code=403, detail={
+                "error": "role request targets a different workspace",
+                "how_to_unlock": "the target workspace's owner must decide it"})
+        m = teams.add_member(db, org.id, rr.user_id, rr.requested_role)
+        granted_role = m.role
+    from backend.security import audit as audit_mod
+    audit_mod.append(db, "team.role_request_decided", {"request_id": request_id,
+                                                       "requested_role": rr.requested_role,
+                                                       "approved": body.approve,
+                                                       "granted_role": granted_role,
+                                                       "decided_by": who, "note": body.note[:200]})
+    db.commit()
+    return {"id": request_id, "status": rr.status, "granted_role": granted_role}
+
+
+# ── Solo → Team conversion (owner-only, server-enforced) ──────────────────────
+
+class ConvertBody(BaseModel):
+    org_name: str | None = None
+
+
+@router.post("/org/convert-to-team", dependencies=[Depends(owner_guard)])
+def org_convert_to_team(body: ConvertBody, principal: _Principal = Depends(require_principal),
+                        db: Session = Depends(get_db)):
+    """Convert the caller's organization to the team tier: unlocks members,
+    invitations, paired runners, private registry, retention admin. The caller
+    stays owner; nothing else about the workspace changes. Audited."""
+    org = principal._org or teams.primary_org(db)
+    before = org.tier
+    caps = entitlements.set_tier(db, "team", body.org_name, org=org)
+    who = principal.user.username if principal.user else "service"
+    from backend.security import audit as audit_mod
+    audit_mod.append(db, "org.converted_to_team", {"org_id": org.id, "from_tier": before,
+                                                   "to_tier": "team", "by": who})
+    db.commit()
+    return {"org": {"id": org.id, "name": org.name, "tier": org.tier},
+            "capabilities": caps,
+            "note": f"converted from {before} to team; you remain the owner — invite members next"}
+
+
 @router.get("/processes", dependencies=[Depends(require_principal)])
-def processes_list(db: Session = Depends(get_db)):
-    org = teams.primary_org(db)
+def processes_list(principal: _Principal = Depends(require_principal),
+                   db: Session = Depends(get_db)):
+    org = principal._org or teams.primary_org(db)
     return {"processes": [{"id": p.id, "name": p.name, "description": p.description,
                            "run_quota_per_day": p.run_quota_per_day,
                            "org_type": p.org_type, "size": p.size,
@@ -957,10 +1206,10 @@ def connectors_inventory(db: Session = Depends(get_db)):
         },
         {
             "id": "http_request", "name": "Outbound HTTP requests",
-            "status": "unavailable",
-            "detail": "by design: generated code runs in a network-blocked sandbox; no egress connector exists yet",
-            "can_see": "nothing",
-            "cannot_see": "the internet — sockets are hard-blocked in the sandbox",
+            "status": "limited",
+            "detail": "node.http calls ONLY hosts on the workflow's static allowlist (validated at bind time, re-checked at run time); generated code itself stays network-blocked",
+            "can_see": "the allowlisted host's response, bounded to 64 KiB, 5 s timeout",
+            "cannot_see": "arbitrary URLs — user- or model-supplied hosts are refused at validation",
         },
         {
             "id": "email_in", "name": "Email reading",

@@ -81,8 +81,8 @@ export const api = {
   registryPublish: (payload) => request('/api/registry/publish', { method: 'POST', body: payload }),
 
   // ── Roadmap: identity ──
-  authRegister: (username, password, displayName) =>
-    request('/api/auth/register', { method: 'POST', body: { username, password, display_name: displayName || '' } }),
+  authRegister: (username, password, displayName, requestedRole) =>
+    request('/api/auth/register', { method: 'POST', body: { username, password, display_name: displayName || '', requested_role: requestedRole || 'operator' } }),
   authLogin: (username, password) =>
     request('/api/auth/login', { method: 'POST', body: { username, password } }),
   authIssueToken: (username, password, name) =>
@@ -124,6 +124,12 @@ export const api = {
     request('/api/triggers', { method: 'POST', body: { workflow_id: workflowId, kind, config: config || {}, evidence_note: evidenceNote || '' } }),
   enableTrigger: (id) => request(`/api/triggers/${encodeURIComponent(id)}/enable`, { method: 'POST', body: {} }),
   disableTrigger: (id) => request(`/api/triggers/${encodeURIComponent(id)}/disable`, { method: 'POST', body: {} }),
+
+  // ── Signup role requests + solo→team conversion ──
+  roleRequests: () => request('/api/team/role-requests'),
+  decideRoleRequest: (id, approve, note) =>
+    request(`/api/team/role-requests/${encodeURIComponent(id)}/decide`, { method: 'POST', body: { approve: !!approve, note: note || '' } }),
+  convertToTeam: (orgName) => request('/api/org/convert-to-team', { method: 'POST', body: { org_name: orgName || undefined } }),
 
   // ── Roadmap: automation expansion ──
   runWorkflow: (workflowId, runDate, filename, dryRun, params) =>

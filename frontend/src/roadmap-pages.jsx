@@ -15,6 +15,7 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [requestedRole, setRequestedRole] = useState('operator');
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -25,7 +26,9 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
     setMsg(null);
     try {
       if (mode === 'signup') {
-        await api.authRegister(username, password, displayName);
+        // requested_role is stored server-side as a PENDING request only —
+        // never a grant, and 'owner' is refused outright (no self-elevation).
+        await api.authRegister(username, password, displayName, requestedRole);
       }
       const issued = await api.authIssueToken(username, password, 'dashboard');
       setToken(issued.token);
@@ -48,9 +51,22 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
           <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required />
         </label>
         {mode === 'signup' && (
-          <label>Display name
-            <input value={displayName} onChange={e => setDisplayName(e.target.value)} />
-          </label>
+          <>
+            <label>Display name
+              <input value={displayName} onChange={e => setDisplayName(e.target.value)} />
+            </label>
+            <label>Requested role
+              <select value={requestedRole} onChange={e => setRequestedRole(e.target.value)}>
+                <option value="observer">Observer — read-only</option>
+                <option value="operator">Operator — run &amp; create workflows</option>
+                <option value="approver">Approver — test &amp; activate</option>
+              </select>
+            </label>
+            <p className="muted small">
+              Your own workspace is created with full owner access. A requested role is a
+              <strong> pending request</strong> for the shared workspace — only an owner can approve it.
+            </p>
+          </>
         )}
         <label>Password
           <input type="password" value={password} onChange={e => setPassword(e.target.value)}
@@ -204,6 +220,7 @@ export function Teams({ identity }) {
   const [members, setMembers] = useState(null);
   const [invites, setInvites] = useState(null);
   const [processes, setProcesses] = useState(null);
+  const [requests, setRequests] = useState(null);
   const [username, setUsername] = useState('');
   const [invite, setInvite] = useState(null);
   const [procName, setProcName] = useState('');
@@ -212,12 +229,24 @@ export function Teams({ identity }) {
 
   async function refresh() {
     try {
-      setMembers(await api.teamMembers());
-      setInvites(await api.teamInvitations());
-      setProcesses(await api.processes());
+      const m = await api.teamMembers();
+      setMembers(m);
+      // Personal-org owners have a solo workspace: team administration surfaces
+      // (member role selects, invitations) are gated by the workspace's tier —
+      // the honest capability, not just the caller's role.
+      const tier = m?.org?.tier;
+      setInvites(tier === 'solo' ? { invitations: [] } : await api.teamInvitations());
+      setProcesses(tier === 'solo' ? { processes: [] } : await api.processes());
+      setRequests(await api.roleRequests().catch(() => ({ role_requests: [] })));
     } catch (e) { setErr(e.message); }
   }
   useState(() => { refresh(); });
+
+  async function decide(id, approve) {
+    setErr(null);
+    try { await api.decideRoleRequest(id, approve); refresh(); }
+    catch (e) { setErr(e.message); }
+  }
 
   return (
     <div className="screen">
@@ -231,7 +260,7 @@ export function Teams({ identity }) {
           <Row key={m.membership_id}>
             <div>{m.display_name || m.username} <span className="muted">({m.username})</span></div>
             <div>
-              {isOwner ? (
+              {isOwner && members.org?.tier !== 'solo' ? (
                 <select value={m.role} onChange={async e => { await api.teamSetRole(m.membership_id, e.target.value); refresh(); }}>
                   {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
@@ -240,11 +269,40 @@ export function Teams({ identity }) {
           </Row>
         ))}
         {members && members.members.length === 0 && <p className="muted">No members yet.</p>}
+        {isOwner && members?.org?.tier === 'solo' && <p className="muted">A solo workspace has a single member. Convert to the Team plan in Settings → Organization to add members and roles.</p>}
         {!isOwner && <p className="muted">Changing roles requires the owner role.</p>}
       </Card>
 
+      <Card title="Role requests (pending signups)">
+        <p className="muted small">
+          New accounts can request a role for this workspace at signup. Requests are stored as
+          pending only — nothing changes until an owner decides here.
+        </p>
+        {isOwner && requests && requests.role_requests.length > 0 && (
+          requests.role_requests.map(r => (
+            <Row key={r.id}>
+              <div>{r.username} → <strong>{r.requested_role}</strong>
+                <span className="muted"> · {r.status}{r.decided_by ? ` by ${r.decided_by}` : ''}</span>
+              </div>
+              <div>
+                {r.status === 'pending' && r.decidable ? (
+                  <>
+                    <button className="link" onClick={() => decide(r.id, true)}>approve</button>
+                    <button className="link danger" onClick={() => decide(r.id, false)}>reject</button>
+                  </>
+                ) : <span className="muted small">{r.status === 'pending' ? 'awaiting the workspace owner' : 'decided'}</span>}
+              </div>
+            </Row>
+          ))
+        )}
+        {requests && requests.role_requests.length === 0 && <p className="muted">No role requests.</p>}
+        {!isOwner && <p className="muted">Only an owner can approve or reject role requests.</p>}
+      </Card>
+
       <Card title="Invite a teammate">
-        {isOwner ? (
+        {isOwner && members?.org?.tier === 'solo' ? (
+          <p className="muted">Invitations unlock with the Team plan — convert in Settings → Organization.</p>
+        ) : isOwner ? (
           <>
             <div className="field"><input placeholder="username of a local account" value={username} onChange={e => setUsername(e.target.value)} /></div>
             <button className="primary" disabled={!username.trim()} onClick={async () => {

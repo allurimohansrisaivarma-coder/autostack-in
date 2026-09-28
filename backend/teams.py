@@ -51,6 +51,37 @@ def primary_org(db: Session) -> Org:
     return get_or_create_org(db)
 
 
+def ensure_personal_org(db: Session, user) -> Org:
+    """Signup affiliation rule: an unaffiliated account becomes the OWNER of its
+    own personal workspace (full feature access, solo tier) instead of being
+    dropped into the shared workspace as a low-privileged member. Idempotent:
+    returns the existing personal org when one is already linked."""
+    existing = db.scalar(select(Membership).where(Membership.user_id == user.id))
+    if existing is not None:
+        org = db.get(Org, existing.org_id)
+        if org is not None:
+            return org
+    org = Org(id=secrets.token_hex(12), name=f"{(user.display_name or user.username)}'s Workspace",
+              tier="solo", local_only=False)
+    db.add(org)
+    db.commit()
+    return org
+
+
+def user_org(db: Session, user) -> Org | None:
+    """The org whose role applies to this caller: a membership in the shared
+    workspace wins (it is the collaboration surface); otherwise the user's own
+    personal org. None when the account has no membership rows at all."""
+    workspace = primary_org(db)
+    rows = db.scalars(select(Membership).where(Membership.user_id == user.id)).all()
+    if not rows:
+        return None
+    for m in rows:
+        if m.org_id == workspace.id:
+            return workspace
+    return db.get(Org, rows[0].org_id)
+
+
 def user_role(db: Session, user) -> str:
     """A user's effective role in the primary org (admin users are owners).
 

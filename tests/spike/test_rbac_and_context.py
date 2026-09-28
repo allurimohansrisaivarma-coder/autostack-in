@@ -15,6 +15,7 @@ Role ladder under test: observer(0) < operator(1) < approver(2) < owner(3).
 from __future__ import annotations
 
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -48,15 +49,21 @@ def _auth(isolated_db_module):
 
 @pytest.fixture(scope="module")
 def owner_h():
-    """The FIRST account in this module's DB is the owner (machine admin).
-    Every later registration is an operator; role changes go through owner."""
-    return _register("rbac-owner-0")
+    """The FIRST account in this module's DB is the owner (machine admin) of the
+    shared workspace. It converts that workspace to the TEAM tier (the new
+    solo→team path) so members can actually be added; later signups own their
+    own PERSONAL workspaces, so shared-workspace roles are granted explicitly
+    via _promote (owner's POST /team/members)."""
+    h = _register("rbac-owner-0")
+    r = client.post("/api/org/tier", json={"tier": "team"}, headers=h)
+    assert r.status_code == 200, r.text
+    return h
 
 
 def _promote(owner_headers: dict, username: str, role: str) -> None:
-    members = client.get("/api/team/members", headers=owner_headers).json()["members"]
-    mid = next(m["membership_id"] for m in members if m["username"] == username)
-    r = client.post(f"/api/team/members/{mid}/role", json={"role": role},
+    """Add an existing user to the SHARED workspace at `role` (owner act).
+    Later signups are personal-org owners now, so they are NOT auto-joined."""
+    r = client.post("/api/team/members", json={"username": username, "role": role},
                     headers=owner_headers)
     assert r.status_code == 200, r.text
 
@@ -86,23 +93,30 @@ CTX = {"org_type": "corporate", "size": "medium",
 # ── role model ────────────────────────────────────────────────────────────────
 
 def test_registration_grants_operator_and_missing_membership_falls_back(owner_h):
-    """The first account is owner; every later registration is operator. A
-    provisioned account whose membership row went missing still acts as
-    operator (the old observer fallback produced false 403s everywhere)."""
+    """The first account is owner of the SHARED workspace. A later signup owns a
+    PERSONAL workspace (solo tier, full access) — that is the affiliation rule,
+    so 'operator' here is exercised via explicit membership, and a provisioned
+    account whose membership row went missing still acts as operator."""
     me = client.get("/api/auth/me", headers=owner_h).json()
     assert me["role"] == "owner"
 
     op_h = _register("rbac-operator-a")
+    _promote(owner_h, "rbac-operator-a", "operator")
     me = client.get("/api/auth/me", headers=op_h).json()
     assert me["role"] == "operator", me
 
-    # simulate a legacy account without a membership row
-    from backend.models import Membership
+    # simulate a legacy provisioned account: NO membership rows at all (the
+    # personal-org model gives every signup a membership, so only provisioned
+    # accounts can look like this) — the operator fallback must keep them working
+    from sqlalchemy import select as _select
+    from backend.models import Membership, User as _User
     db = test_session()
     try:
-        row = db.query(Membership).filter(Membership.role == "operator").first()
-        assert row is not None
-        db.delete(row)
+        uid = db.scalar(_select(_User.id).where(_User.username == "rbac-operator-a"))
+        user_rows = db.query(Membership).filter(Membership.user_id == uid).all()
+        assert user_rows, "expected at least one membership row for rbac-operator-a"
+        for row in user_rows:
+            db.delete(row)
         db.commit()
     finally:
         db.close()
@@ -293,6 +307,128 @@ def test_org_profile_roundtrip(owner_h):
                     json={"org_type": "individual", "size": "large",
                           "department": "personal"}, headers=owner_h)
     assert r.status_code == 422, r.text
+
+
+# ── signup affiliation + role requests + plan conversion ────────────────────
+
+def test_unaffiliated_signup_gets_personal_org_as_owner(owner_h):
+    """Signup rule: a later signup owns a PERSONAL workspace (solo tier) — never
+    dropped into the shared workspace as a member, never self-elevated."""
+    uname = f"solo-{uuid.uuid4().hex[:6]}"
+    h = _register(uname)
+    me = client.get("/api/auth/me", headers=h).json()
+    assert me["role"] == "owner", me
+    # The caller's capabilities resolve from THEIR org (solo), not the first org
+    assert me["capabilities"]["tier"] == "solo"
+    # the SHARED workspace (seen through its owner) must not contain this user
+    members = client.get("/api/team/members", headers=owner_h).json()["members"]
+    assert all(m["username"] != uname for m in members), members
+    # ...while the caller's own workspace lists exactly them as owner
+    own = client.get("/api/team/members", headers=h).json()
+    assert own["org"]["tier"] == "solo" and len(own["members"]) == 1
+    assert own["members"][0]["username"] == uname and own["members"][0]["role"] == "owner"
+
+
+def test_signup_requested_role_is_pending_only(owner_h):
+    """A requested role is stored as a PENDING request; the account's role does
+    not change, 'owner' is refused outright, and only an owner can approve."""
+    uname = f"req-{uuid.uuid4().hex[:6]}"
+    r = client.post("/api/auth/register",
+                    json={"username": uname, "password": PASSWORD,
+                          "requested_role": "approver"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["role"] == "owner"  # personal workspace owner, as designed
+    assert body["requested_role"]["status"] == "pending"
+    tok = client.post("/api/auth/tokens",
+                      json={"username": uname, "password": PASSWORD}).json()["token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    # injected role/is_admin must not change anything
+    me = client.get("/api/auth/me", headers=h).json()
+    assert me["user"]["is_admin"] is False
+
+    # non-owner sees only their own requests and cannot decide
+    r = client.get("/api/team/role-requests", headers=h)
+    assert r.status_code == 200
+    assert all(row["username"] == uname for row in r.json()["role_requests"])
+    rid = r.json()["role_requests"][0]["id"]
+    r = client.post(f"/api/team/role-requests/{rid}/decide",
+                    json={"approve": True}, headers=h)
+    assert r.status_code == 403, r.text
+
+    # owner approves → membership in the SHARED workspace at the requested role
+    r = client.post(f"/api/team/role-requests/{rid}/decide",
+                    json={"approve": True, "note": "ok"}, headers=owner_h)
+    assert r.status_code == 200, r.text
+    assert r.json()["granted_role"] == "approver"
+    members = client.get("/api/team/members", headers=owner_h).json()["members"]
+    assert any(m["username"] == uname and m["role"] == "approver" for m in members)
+
+    # double-decide is refused honestly
+    r = client.post(f"/api/team/role-requests/{rid}/decide",
+                    json={"approve": True}, headers=owner_h)
+    assert r.status_code == 409
+
+
+def test_owner_role_request_refused_outright(owner_h):
+    """'owner' is not a requestable role — no self-elevation path exists."""
+    uname = f"req-{uuid.uuid4().hex[:6]}"
+    r = client.post("/api/auth/register",
+                    json={"username": uname, "password": PASSWORD,
+                          "requested_role": "owner"})
+    assert r.status_code == 200, r.text
+    assert r.json()["requested_role"] is None  # refused silently-but-honestly
+
+
+def test_role_management_requires_owner_not_just_machine_admin(owner_h):
+    """An operator (explicitly added to the shared workspace) cannot change
+    roles, add members, invite, or convert the SHARED plan — owner_guard, not
+    the old admin_guard. Their own personal workspace stays fully theirs."""
+    op_h = _register("plain-operator")
+    _promote(owner_h, "plain-operator", "operator")
+    members = client.get("/api/team/members", headers=owner_h).json()["members"]
+    mid = next(m["membership_id"] for m in members if m["username"] == "plain-operator")
+    assert client.post(f"/api/team/members/{mid}/role",
+                       json={"role": "owner"}, headers=op_h).status_code == 403
+    assert client.post("/api/team/members",
+                       json={"username": "ghost-user", "role": "observer"},
+                       headers=op_h).status_code == 403
+    assert client.post("/api/team/invitations", json={"role": "observer"},
+                       headers=op_h).status_code == 403
+    # converting the plan is owner-only: the operator's caller-org IS the shared
+    # workspace (membership wins), so a tier change is refused — and their
+    # personal-org conversion path is covered by test_solo_to_team_conversion
+    assert client.post("/api/org/tier", json={"tier": "enterprise"},
+                       headers=op_h).status_code == 403
+    assert client.post("/api/org/convert-to-team", json={},
+                       headers=op_h).status_code == 403
+    # ...and the shared workspace tier is untouched by the operator
+    shared = client.get("/api/team/members", headers=owner_h).json()["org"]
+    assert shared["tier"] == "team"  # set by the module fixture, not the operator
+
+
+def test_solo_to_team_conversion_unlocks_capabilities():
+    """An owner converts their personal workspace: tier becomes team, capabilities
+    unlock, and the caller stays owner. Server-side enforced."""
+    uname = f"conv-{uuid.uuid4().hex[:6]}"
+    h = _register(uname)
+    r = client.post("/api/org/convert-to-team", json={"org_name": "Team Awesome"},
+                    headers=h)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["org"]["tier"] == "team"
+    caps = out["capabilities"]
+    assert caps["members"] >= 25 and caps["paired_runner"] and caps["private_registry"]
+    assert caps["retention_admin"]
+    # still the owner
+    assert client.get("/api/auth/me", headers=h).json()["role"] == "owner"
+    # now invitations work (tier unlocked)
+    r = client.post("/api/team/invitations", json={"role": "operator"}, headers=h)
+    assert r.status_code == 200, r.text
+    # conversion audited
+    audit = client.get("/api/audit?limit=200", headers=h)
+    kinds = [e["kind"] for e in audit.json().get("entries", [])] if audit.status_code == 200 else []
+    assert "org.converted_to_team" in kinds, kinds[:20]
 
 
 def test_processes_carry_context(owner_h):

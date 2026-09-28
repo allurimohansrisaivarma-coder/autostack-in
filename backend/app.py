@@ -68,6 +68,13 @@ with db_engine.begin() as _conn:
         if _col not in _existing:
             _conn.execute(_sqltext(f"ALTER TABLE processes ADD COLUMN {_col} {_ddl}"))
 
+# Affiliation model: per-workspace HTTP host allowlists (node.http). Existing
+# databases predate the table; add the column idempotently.
+with db_engine.begin() as _conn:
+    _wfcols = {row[1] for row in _conn.execute(_sqltext("PRAGMA table_info(workflows)"))}
+    if "http_allow_hosts_json" not in _wfcols:
+        _conn.execute(_sqltext("ALTER TABLE workflows ADD COLUMN http_allow_hosts_json TEXT NOT NULL DEFAULT '[]'"))
+
 app = FastAPI(title="AutoStack spike worker", version="0.1.0")
 app.include_router(roadmap_router)
 
@@ -201,6 +208,11 @@ def save_workflow(body: WorkflowBody, db: Session = Depends(get_db)):
     db.add(WorkflowVersion(id=str(uuid.uuid4()), workflow_id=body.id, version=vnext,
                            graph_json=canonical, artifact_sha256=artifact,
                            changelog=f"spike save {now_iso()}"))
+    # Per-workflow HTTP allowlist (node.http): the static host list the approved
+    # graph may call. validate_graph already refused nodes referencing hosts
+    # outside it; persisting the sorted set keeps it inspectable on the row.
+    wf.http_allow_hosts_json = json.dumps(sorted({h for h in (body.graph.get("http_allow_hosts") or [])
+                                                  if isinstance(h, str)}))
     db.commit()
     audit_mod.append(db, "workflow.saved", {"workflow_id": body.id, "version": vnext,
                                             "artifact_sha256": artifact})
@@ -1155,6 +1167,8 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
     applied_copied: list[str] = []
     applied_appended: list[str] = []
     applied_soft_deleted: list[str] = []
+    branch_tables: dict[str, list[dict]] = {}  # table as it left each node (for merge)
+    merge_inputs: list[list[dict]] = []  # table snapshots feeding control.merge
     for nid in _topo_order(graph):
         node = nodes[nid]
         ntype = node.get("type", "")
@@ -1201,6 +1215,53 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
                     downstream = _branch_targets(graph, nid)
                     branch_skips.update(downstream)
                     detail["skipped_downstream"] = len(downstream)
+            elif ntype == "data.transform":
+                # Plan-scoped field set/rename (n8n Transform node). Only fields
+                # the approved plan maps may be touched: set entries are
+                # field=value literals whose field name must appear in the
+                # plan's field mappings (or be the run-level id field).
+                plan_fields = set((plan.get("field_mappings") or {}).keys()) | \
+                    {plan.get("client_id_field", "ClientID")}
+                set_clause = params_n.get("set", "")
+                renames: dict[str, str] = {}
+                raw_rename = params_n.get("rename", "")
+                if raw_rename:
+                    for pair in raw_rename.split(","):
+                        src, _, dst = pair.partition("=")
+                        if src.strip() and dst.strip():
+                            renames[src.strip()] = dst.strip()
+                new_table: list[dict] = []
+                for r in table:
+                    row = dict(r)
+                    for src, dst in renames.items():
+                        if src in row:
+                            row[dst] = row.pop(src)
+                    if set_clause:
+                        field, _, literal = set_clause.partition("=")
+                        field = field.strip()
+                        if field and field not in plan_fields:
+                            raise rows.ClientDataError(
+                                f"data.transform: field '{field}' is outside the approved plan scope")
+                        row[field] = literal.strip().strip("\"'")
+                    new_table.append(row)
+                table = new_table
+                detail = {"rows": len(table), "renamed": sorted(renames), "set": set_clause or None}
+            elif ntype == "control.merge":
+                # n8n Merge: union-join the rows that reached this node from each
+                # incoming edge. Pure in-memory combine of branch outputs — no
+                # external service, no effect to journal.
+                preds = [e.get("from") for e in graph.get("edges", [])
+                         if e.get("to") == nid and e.get("from") in branch_tables]
+                merged_rows: list[dict] = []
+                sources = [branch_tables[p] for p in preds if branch_tables[p]]
+                for i in range(max((len(s) for s in sources), default=0)):
+                    row: dict = {}
+                    for s in sources:
+                        if i < len(s):
+                            row.update(s[i])
+                    merged_rows.append(row)
+                table = merged_rows
+                detail = {"rows": len(table), "branches": len(sources)}
             elif ntype == "file.update_rows":
                 set_clause = params_n.get("set", "")
                 field, _, literal = set_clause.partition("=")
@@ -1356,6 +1417,59 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
                         detail = {"gate_id": gate.id, "status": "awaiting_gate"}
                         return {"updated": updated, "drafted": drafted, "skipped": skipped,
                                 "notified": notified, "paused_at_gate": gate.id, **detail}
+            elif ntype == "control.wait":
+                # Bounded pause (n8n Wait node). The catalog validates 0..30 s at
+                # bind time; the executor enforces the cap again (defense in depth).
+                from backend.engine.catalog import MAX_WAIT_SECONDS
+                secs = int(params_n.get("seconds", 0))
+                if secs < 0 or secs > MAX_WAIT_SECONDS:
+                    raise rows.ClientDataError(
+                        f"control.wait seconds must be 0..{MAX_WAIT_SECONDS}")
+                if secs:
+                    time.sleep(secs)
+                detail = {"waited_seconds": secs}
+            elif ntype == "node.http":
+                # Allowlisted HTTP request (n8n HTTP Request, locked down):
+                # host must be on the workflow's static allowlist (validated at
+                # bind time; re-checked here), method/path come from the approved
+                # plan — never from run-time user or model input.
+                from backend.engine.catalog import HTTP_HOST_ALLOWLIST
+                import urllib.request as _uq
+                host = str(params_n.get("host", "")).strip().lower()
+                wf_hosts = {h.strip().lower() for h in (graph.get("http_allow_hosts") or [])
+                            if isinstance(h, str)}
+                if host not in HTTP_HOST_ALLOWLIST or host not in wf_hosts:
+                    raise rows.ClientDataError(f"node.http: host '{host}' is not on the workflow's allowlist")
+                method = str(params_n.get("method", "GET")).upper()
+                if method not in {"GET", "POST"}:
+                    raise rows.ClientDataError(f"node.http: method {method} not allowed (GET/POST only)")
+                path = str(params_n.get("path", "/"))
+                if not path.startswith("/") or ".." in path or len(path) > 500:
+                    raise rows.ClientDataError(f"node.http: unsafe path {path!r}")
+                body_key = params_n.get("body_key", "")
+                if dry_run:
+                    detail = {"dry_run": True, "would_request": f"{method} http://{host}{path}"}
+                else:
+                    url = f"http://{host}{path}"
+                    data = None
+                    headers = {}
+                    if method == "POST" and body_key:
+                        first = table[0] if table else {}
+                        data = json.dumps({"rows": len(table), body_key: first}).encode()
+                        headers["Content-Type"] = "application/json"
+                    req = _uq.Request(url, data=data, headers=headers, method=method)
+                    try:
+                        with _uq.urlopen(req, timeout=5) as resp:
+                            raw = resp.read(64 * 1024)  # bounded response
+                    except rows.ClientDataError:
+                        raise
+                    except Exception as exc:
+                        # Network failures (refused/unreachable/HTTP error status)
+                        # are client-caused run failures: clean 400 with status and
+                        # reason — never an opaque 500, never the response body.
+                        raise rows.ClientDataError(f"node.http call failed: {exc}") from exc
+                    detail = {"status": "called", "url": url, "bytes": len(raw),
+                              "body_sha256": sha256_bytes(raw)[:32]}
             elif ntype == "notify.desktop":
                 notified = True
                 detail = {"notified": True}
@@ -1368,6 +1482,9 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
                 detail = {"continued_after_error": error}
         ms = int((time.perf_counter() - t0) * 1000)
         seq += 1
+        # Remember the table as it left this node so control.merge can union the
+        # rows that arrived from each incoming edge (n8n-style branch join).
+        branch_tables[nid] = table
         _node_record(db, run.id, seq, f"{nid}:{ntype}", "failed" if error else "passed",
                      detail, None, error, ms=ms)
         db.commit()

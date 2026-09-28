@@ -67,7 +67,37 @@ CATALOG: dict[str, NodeSpec] = {
         # Roadmap §E: control-flow + human-gate nodes (same validation as the rest).
         NodeSpec("control.branch", {"condition": str}, ("condition",), ("taken",)),
         NodeSpec("approval.gate", {"prompt": str}, ("prompt",), ("gate_id",), "activate"),
+        # Transform/Set (n8n core, plan-scoped): only the approved plan's fields
+        # can be mapped — `set` entries are `field=value` literals, validated
+        # against the plan's field mappings, so no code or arbitrary paths.
+        NodeSpec("data.transform", {"set": str, "rename": str}, (), ("rows",)),
+        # Merge (n8n core): combines branch outputs for downstream nodes. The
+        # executor union-joins row dicts seen so far — a pure in-memory combine,
+        # no external service.
+        NodeSpec("control.merge", {}, (), ("rows",)),
+        # Wait (n8n core, bounded): a bounded pause before continuing. The cap is
+        # a catalog constant (max 30 s, validated at bind time) so a graph can
+        # never stall a run indefinitely.
+        NodeSpec("control.wait", {"seconds": int}, ("seconds",), ("waited",)),
+        # Allowlisted HTTP (n8n HTTP Request, locked down): the WORKFLOW carries a
+        # static host allowlist (set at bind time, stored with the version), and
+        # the node may only call those hosts with the approved method/path. No
+        # user- or model-supplied URLs at run time; the sandboxed executor uses
+        # urllib with a hard timeout and a bounded response size.
+        NodeSpec("node.http", {"host": str, "method": str, "path": str, "body_key": str},
+                 ("host", "method", "path"), ("response",), "allowlisted-host",
+                 ("host-not-allowlisted", "timeout", "bad-response")),
     ]
+}
+
+# Bounded wait cap (catalog-level contract; the executor enforces it too).
+MAX_WAIT_SECONDS = 30
+
+# Static outbound HTTP allowlist: hosts a workflow may ever call. Even a
+# per-workflow allowlist cannot exceed this deployment-level allowlist.
+HTTP_HOST_ALLOWLIST = {
+    "127.0.0.1",        # local worker/bridge self-calls
+    "localhost",
 }
 
 VALID_ON_FAIL = {"halt", "continue", "error_branch"}
@@ -109,6 +139,27 @@ def validate_graph(graph: dict) -> list[str]:
         if retry is not None:
             if not isinstance(retry, dict) or not isinstance(retry.get("attempts", 0), int) or retry.get("attempts", 0) > 3:
                 errors.append(f"{nid}: retry.attempts must be int <= 3")
+        # Bounded wait: a graph may pause at most MAX_WAIT_SECONDS (never stall).
+        if ntype == "control.wait":
+            secs = params.get("seconds")
+            if isinstance(secs, int) and not (0 <= secs <= MAX_WAIT_SECONDS):
+                errors.append(f"{nid}: control.wait seconds must be 0..{MAX_WAIT_SECONDS}")
+        # Allowlisted HTTP: the host must be in BOTH the workflow's declared
+        # per-workflow allowlist (graph-level) and the deployment allowlist.
+        if ntype == "node.http":
+            host = str(params.get("host", "")).strip().lower()
+            wf_hosts = {h.strip().lower() for h in (graph.get("http_allow_hosts") or [])
+                        if isinstance(h, str)}
+            if host not in HTTP_HOST_ALLOWLIST or host not in wf_hosts:
+                errors.append(f"{nid}: host '{host or '(missing)'}' is not on the " +
+                              "workflow's HTTP allowlist")
+        # Merge is a join point: it must have at least one incoming edge (a merge
+        # with no inputs would silently pass an empty table downstream).
+        if ntype == "control.merge":
+            incoming = sum(1 for e in graph.get("edges", [])
+                           if e.get("to") == nid and e.get("from") in known)
+            if incoming < 1:
+                errors.append(f"{nid}: control.merge needs at least one incoming edge")
     edges = graph.get("edges", [])
     for edge in edges:
         if edge.get("from") not in known or edge.get("to") not in known:

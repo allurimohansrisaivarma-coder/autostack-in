@@ -22,6 +22,9 @@ class Workflow(Base):
     demo: Mapped[bool] = mapped_column(Boolean, default=False)
     # B4 soft delete: set when removed; runs/versions/audit history are retained
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # node.http scope: static per-workflow host allowlist (JSON array). Even a
+    # per-workflow allowlist cannot exceed the deployment allowlist in catalog.py.
+    http_allow_hosts_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
 
 class WorkflowVersion(Base):
@@ -297,6 +300,25 @@ class Invitation(Base):
     created_by: Mapped[str] = mapped_column(String(24), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     accepted_by: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RoleRequest(Base):
+    """Signup role request: a PENDING elevation request only — never a grant.
+
+    A new account may ask for a role in the workspace org (requested_role);
+    only an OWNER can approve it via /team/role-requests. There is deliberately
+    no path where the requester's role changes without an owner decision,
+    and 'owner' is refused outright at request time (no self-elevation).
+    """
+    __tablename__ = "role_requests"
+    id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(24), ForeignKey("users.id"), nullable=False)
+    requested_role: Mapped[str] = mapped_column(String(24), nullable=False)  # observer|operator|approver
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending|approved|rejected
+    note: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    decided_by: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
