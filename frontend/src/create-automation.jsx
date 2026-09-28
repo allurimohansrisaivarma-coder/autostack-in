@@ -6,10 +6,14 @@ import { api } from './api.js';
 import { subscribeLive, capturePoll } from './live.js';
 import { Icon, ICONS, Terminal, stamp } from './main-shared.jsx';
 
-export function CreateAutomation({ setPage }) {
+export function CreateAutomation({ setPage, identity }) {
   const [step, setStep] = useState(1);
   const [live, setLive] = useState(null);
   useEffect(() => subscribeLive(setLive), []);
+
+  const isObserver = identity && identity.role === 'observer';
+  const isApproverOrOwner = identity && (identity.role === 'approver' || identity.role === 'owner');
+  const isOwner = identity && identity.role === 'owner';
 
   // Step 2: real capture polling against the worker (honest failures included).
   const [monitoring, setMonitoring] = useState(false);
@@ -282,9 +286,11 @@ export function CreateAutomation({ setPage }) {
               ))}
             </div>
             <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
-              <button className="btn-outline" disabled={busy || !planId || !!artifact} onClick={generate}>1 · Generate</button>
-              <button className="btn-outline" disabled={busy || !artifact || (job && job.status === 'passed')} onClick={runTest}>2 · Run sandbox test</button>
-              <button className="btn-primary" disabled={busy || !job || job.status !== 'passed' || !!approval} onClick={approve}>3 · Approve activation</button>
+              <button className="btn-outline" disabled={busy || !planId || !!artifact || isObserver} title={isObserver ? 'Observer role has read-only access' : ''} onClick={generate}>1 · Generate</button>
+              <button className="btn-outline" disabled={busy || !artifact || (job && job.status === 'passed') || isObserver} title={isObserver ? 'Observer role has read-only access' : ''} onClick={runTest}>2 · Run sandbox test</button>
+              <button className="btn-primary" disabled={busy || !job || job.status !== 'passed' || !!approval || !isApproverOrOwner} title={!isApproverOrOwner ? 'Activation approval requires Approver or Owner role' : ''} onClick={approve}>
+                3 · Approve activation {!isApproverOrOwner && '(Approver+)'}
+              </button>
               {approval && <button className="btn-dark" onClick={() => setStep(5)}>Continue to bind <Icon d={ICONS.arrow} size={14} /></button>}
             </div>
             {job && job.report && job.report.checks && (
@@ -311,11 +317,11 @@ export function CreateAutomation({ setPage }) {
               <div className="publish-stat"><span>Workflow</span><b>{bound ? `${bound.workflow_id} v${bound.version}` : 'not bound'}</b></div>
             </div>
             <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
-              <button className="btn-primary" disabled={busy || !approval || !!bound} onClick={bind}>
+              <button className="btn-primary" disabled={busy || !approval || !!bound || isObserver} title={isObserver ? 'Observer role is read-only' : ''} onClick={bind}>
                 <Icon d={ICONS.check} size={16} /> {bound ? 'Workflow bound' : 'Create workflow'}
               </button>
-              <button className="btn-outline" disabled={!bound || busy || published} onClick={publish}>
-                {published ? 'Published' : 'Publish to Registry'}
+              <button className="btn-outline" disabled={!bound || busy || published || !isOwner} title={!isOwner ? 'Publication to National Registry requires Owner role' : ''} onClick={publish}>
+                {published ? 'Published' : isOwner ? 'Publish to Registry' : 'Publish (Owner role required)'}
               </button>
               {bound && <button className="btn-dark" onClick={() => setPage('workflows')}>Go to Workflows <Icon d={ICONS.arrow} size={14} /></button>}
             </div>

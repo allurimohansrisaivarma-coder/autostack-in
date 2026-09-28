@@ -58,6 +58,7 @@ artifacts/spike/resources/sample-tracking-file/dryrun-*.csv
 artifacts/spike/resources/sample-tracking-file/gate-*.csv
 artifacts/spike/resources/sample-tracking-file/hard-*.csv
 artifacts/spike/resources/sample-tracking-file/params-*.csv
+artifacts/spike/resources/sample-tracking-file/mx-*.csv
 artifacts/spike/resources/sample-tracking-file/rb*.csv
 artifacts/spike/watched/
 
@@ -83,3 +84,6 @@ Desktop.ini
 # ── Misc ─────────────────────────────────────────────────────────────────
 *.local
 *.log
+
+.vercel
+.env*

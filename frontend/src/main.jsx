@@ -254,11 +254,11 @@ function App() {
     notifications: <NotificationCenter />,
     privacy: <DataPrivacy />,
     connectors: <Connectors />,
-    dashboard: <Dashboard setPage={setPage} />,
-    discovery: <Discovery setPage={setPage} />,
+    dashboard: <Dashboard setPage={setPage} identity={identity} />,
+    discovery: <Discovery setPage={setPage} identity={identity} />,
     registry: <Registry identity={identity} />,
-    workflows: <Workflows setPage={setPage} />,
-    create: <CreateAutomation setPage={setPage} />,
+    workflows: <Workflows setPage={setPage} identity={identity} />,
+    create: <CreateAutomation setPage={setPage} identity={identity} />,
     trustlog: <TrustLog />,
   };
   const Screen = screenMap[page] || <NotFound setPage={setPage} />;

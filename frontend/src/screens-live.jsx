@@ -18,7 +18,7 @@ function timeShort(iso) {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
-export function Dashboard({ setPage }) {
+export function Dashboard({ setPage, identity }) {
   const [live, setLive] = useState(null);
   useEffect(() => subscribeLive(setLive), []);
   const connected = !!(live && live.connected);
@@ -27,6 +27,7 @@ export function Dashboard({ setPage }) {
   const cands = ((live && live.candidates) || []).filter(c => c.status === 'suggested');
   const notes = (live && live.notifications) || [];
   const unread = notes.filter(n => !n.read_at).length;
+  const isObserver = identity && identity.role === 'observer';
 
   const passed = runs.filter(r => r.status === 'passed').length;
   const successRate = runs.length ? Math.round((passed / runs.length) * 100) : null;
@@ -69,9 +70,15 @@ export function Dashboard({ setPage }) {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button className="btn-icon" title="Notifications" aria-label="Notifications" onClick={() => setPage('notifications')}><Icon d={ICONS.bell} /></button>
-          <button className="btn-primary" onClick={() => setPage('create')}>
-            <Icon d={ICONS.plus} size={16} /> Create automation
-          </button>
+          {isObserver ? (
+            <button className="btn-outline" onClick={() => setPage('workflows')}>
+              <Icon d={ICONS.flow} size={16} /> View workflows
+            </button>
+          ) : (
+            <button className="btn-primary" onClick={() => setPage('create')}>
+              <Icon d={ICONS.plus} size={16} /> Create automation
+            </button>
+          )}
         </div>
       </div>
 
@@ -208,7 +215,7 @@ export function Dashboard({ setPage }) {
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
 
-export function Workflows({ setPage }) {
+export function Workflows({ setPage, identity }) {
   const [live, setLive] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [nodes, setNodes] = useState([]);
@@ -221,6 +228,7 @@ export function Workflows({ setPage }) {
   const selected = workflows.find(w => w.id === selectedId) || null;
   const selRuns = runs.filter(r => r.workflow_id === selectedId);
   const runningRun = selRuns.find(r => r.status === 'running' || r.status === 'pending');
+  const isObserver = identity && identity.role === 'observer';
 
   useEffect(() => {
     if (!runningRun) return undefined;
@@ -270,9 +278,11 @@ export function Workflows({ setPage }) {
           <div className="breadcrumb">My Workflows</div>
           <h2>All Workflows</h2>
         </div>
-        <button className="btn-primary" onClick={() => setPage('create')}>
-          <Icon d={ICONS.plus} size={16} /> Create New Automation
-        </button>
+        {!isObserver && (
+          <button className="btn-primary" onClick={() => setPage('create')}>
+            <Icon d={ICONS.plus} size={16} /> Create New Automation
+          </button>
+        )}
       </div>
 
       {!connected && (
@@ -328,11 +338,17 @@ export function Workflows({ setPage }) {
             <div className="detail-section">
               <div className="detail-label">Actions</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                <button className="btn-primary full-w" disabled={busy || !connected} onClick={() => runNow(selected.id)}>
-                  <Icon d={ICONS.refresh} size={16} /> Run now
-                </button>
+                {isObserver ? (
+                  <button className="btn-outline full-w" disabled={true} title="Observer role has read-only access">
+                    <Icon d={ICONS.lock} size={14} /> Run now (Requires Operator role)
+                  </button>
+                ) : (
+                  <button className="btn-primary full-w" disabled={busy || !connected} onClick={() => runNow(selected.id)}>
+                    <Icon d={ICONS.refresh} size={16} /> Run now
+                  </button>
+                )}
                 {selected.id === 'wf_invoice_po_compare' && (
-                  <button className="btn-outline full-w" disabled={busy || !connected} onClick={runCompare}>
+                  <button className="btn-outline full-w" disabled={busy || !connected || isObserver} onClick={runCompare}>
                     Run invoice/PO comparison
                   </button>
                 )}

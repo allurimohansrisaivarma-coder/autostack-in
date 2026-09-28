@@ -53,6 +53,39 @@ with db_engine.begin() as _conn:
         _conn.execute(_sqltext(
             f"CREATE INDEX IF NOT EXISTS {_idx} ON {_tbl}({_col})"))
 
+# Ensure sample tracking CSV and default built-in workflow exist
+_sample_target = cfg.DATA_DIR / "resources" / "sample-tracking-file" / "clients.csv"
+if not _sample_target.is_file() and (cfg.FIXTURES_DIR / "clients-before.csv").is_file():
+    _sample_target.parent.mkdir(parents=True, exist_ok=True)
+    _sample_target.write_bytes((cfg.FIXTURES_DIR / "clients-before.csv").read_bytes())
+
+with Session(db_engine) as _init_db:
+    if _init_db.get(Workflow, "wf_client_followup") is None:
+        _wf = Workflow(id="wf_client_followup", name="Client Follow-up (spike)", demo=True)
+        _init_db.add(_wf)
+        _graph = {
+            "id": "wf_client_followup",
+            "name": "Client Follow-up (spike)",
+            "triggers": [{"type": "schedule", "cron": "0 9 * * MON-FR"}],
+            "nodes": [
+                {"id": "src", "type": "file.read_table", "params": {"alias": "sample-tracking-file", "max_rows": 1000}},
+                {"id": "due", "type": "data.filter", "params": {"from": "src.rows", "where": "due"}},
+                {"id": "note", "type": "notify.desktop", "params": {"title_key": "run_done"}},
+            ],
+            "edges": [{"from": "src", "to": "due"}, {"from": "due", "to": "note"}],
+        }
+        _canonical = json.dumps(_graph, sort_keys=True)
+        _artifact = sha256_bytes(_canonical.encode())
+        _init_db.add(WorkflowVersion(
+            id=str(uuid.uuid4()),
+            workflow_id="wf_client_followup",
+            version=1,
+            graph_json=_canonical,
+            artifact_sha256=_artifact,
+            changelog="Initial built-in workflow",
+        ))
+        _init_db.commit()
+
 app = FastAPI(title="AutoStack spike worker", version="0.1.0")
 app.include_router(roadmap_router)
 
