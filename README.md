@@ -26,12 +26,13 @@ Client follow-ups, PO matching, invoice reconciliation, and filing reminders are
 
 ## Live Demo
 
-| Component | URL |
-|-----------|-----|
-| Frontend (Vite + React 19) | [autostack-in.vercel.app](https://autostack-in.vercel.app) |
-| Backend API (FastAPI) | Self-hosted / local worker |
+| Component | URL | Status |
+|-----------|-----|--------|
+| Frontend (Vite + React 19) | [autostack-in.vercel.app](https://autostack-in.vercel.app) | Production (Vercel) |
+| Backend API (FastAPI on Railway) | [autostack-backend-production.up.railway.app](https://autostack-backend-production.up.railway.app) | Production (Railway) |
+| Local Worker (Self-hosted) | `http://127.0.0.1:8747` | Dev / Local-first |
 
-> The backend is a local-first worker. The frontend auto-detects the worker at `localhost:8747`.
+> The production deployment connects the Vercel frontend to the Railway backend with dynamic CORS and token persistence. For local development, the frontend auto-detects the local worker at `http://127.0.0.1:8747`.
 
 ---
 
