@@ -1,22 +1,28 @@
-# Spike S6 artifact: worker container image (FastAPI worker; Node-RED stays embedded in the
-# desktop shell — NOT containerized, it must reach local files/devices).
+# AutoStack worker container — Railway-compatible.
+# Build context: repo root.  `docker build -f deploy/Dockerfile.worker .`
 FROM python:3.13-slim
 
 WORKDIR /app
 
-COPY backend/requirements.txt backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt
+# ── 1. Install dependencies (own layer — cached unless requirements.txt changes) ──
+COPY requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
+# ── 2. Copy source ────────────────────────────────────────────────────────────
 COPY backend/ backend/
+COPY shared/  shared/
 
-# Non-root, unprivileged runtime.
-RUN useradd --create-home appuser
+# ── 3. Non-root runtime ───────────────────────────────────────────────────────
+RUN useradd --create-home appuser \
+ && mkdir -p /data \
+ && chown appuser /data
 USER appuser
 
+# Railway sets $PORT dynamically; fall back to 8747 for local runs.
 ENV AUTOSTACK_DATA_DIR=/data
 EXPOSE 8747
 
-HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8747/api/health', timeout=2)"
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import urllib.request, os; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT','8747') + '/api/health', timeout=3)"
 
-CMD ["python", "-m", "uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8747"]
+CMD ["sh", "-c", "python -m uvicorn backend.app:app --host 0.0.0.0 --port ${PORT:-8747}"]

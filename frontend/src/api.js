@@ -1,7 +1,7 @@
 // AutoStack worker API client (Spike deliverable: typed wrapper over the v1 contracts).
 // The worker owns every effect; the browser only talks to these endpoints.
 
-const BASE = 'http://127.0.0.1:8747';
+const BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8747';
 let token = '';
 // Session persistence: restore the token at module load so a reload (or app
 // restart) resumes the signed-in session. Invalid/revoked tokens fall out

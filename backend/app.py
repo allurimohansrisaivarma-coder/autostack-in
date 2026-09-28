@@ -69,13 +69,17 @@ async def body_size_limit(request, call_next):  # noqa: ANN001
                                              "limit_bytes": max_bytes})
     return await call_next(request)
 
-# The dashboard (Vite dev server / Electron renderer) is a different origin than the
-# loopback worker. Auth stays token-header based (no cookies), so a scoped origin
-# allowlist is safe; loopback-only binding keeps the blast radius local.
+# CORS: allow the Vite dev servers locally, plus any origins listed in ALLOWED_ORIGINS
+# (comma-separated). Set ALLOWED_ORIGINS=https://your-app.vercel.app on Railway.
+import os as _os
+_default_origins = [
+    "http://localhost:5173", "http://127.0.0.1:5173",
+    "http://localhost:4173", "http://127.0.0.1:4173",
+]
+_extra = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
-                   "http://localhost:4173", "http://127.0.0.1:4173"],
+    allow_origins=_default_origins + _extra,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
