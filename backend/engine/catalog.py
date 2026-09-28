@@ -28,9 +28,37 @@ CATALOG: dict[str, NodeSpec] = {
         NodeSpec("file.read_table", {"alias": str, "max_rows": int}, ("alias",), ("rows",), "read-content",
                  ("unsupported-format", "too-large", "bad-ids")),
         NodeSpec("data.filter", {"from": str, "where": str}, ("from", "where"), ("rows",)),
+        # Aggregation node (safe catalog): counts rows in the current table into a
+        # structured summary. Read-only by construction — no effect, no journal
+        # claim — so it can sit anywhere in a graph (e.g. before an approval gate
+        # to give the approver context in the audit trail).
+        NodeSpec("data.aggregate", {"field": str}, (), ("summary",)),
         NodeSpec("file.update_rows", {"alias": str, "filename": str, "set": str, "purpose": str,
                                        "key_field": str},
                  ("alias", "filename", "set", "purpose"), ("updated",), "write-target",
+                 ("lock", "conflict", "idempotent-claimed")),
+        # File operations (n8n-style, scoped to declared resource aliases): a copy is
+        # a whole-file staged write with backup; an archive adds a dated sibling and
+        # never touches the source. Filenames are plain names inside the alias —
+        # resolve_resource() rejects traversal/junctions at the safeio layer.
+        NodeSpec("file.copy", {"from_alias": str, "from_filename": str,
+                                "to_alias": str, "to_filename": str},
+                 ("from_alias", "from_filename", "to_alias", "to_filename"), ("copied",), "write-target",
+                 ("lock", "conflict", "idempotent-claimed")),
+        NodeSpec("file.archive", {"alias": str, "filename": str},
+                 ("alias", "filename"), ("archived",), "write-target",
+                 ("lock", "conflict", "idempotent-claimed")),
+        # Row operations (exactly-once, journaled like update_rows): append adds
+        # keyed rows (duplicate keys are skipped by the journal); soft_delete
+        # rewrites a status-style field instead of destroying data — rollback can
+        # restore the prior value from the audit trail.
+        NodeSpec("rows.append", {"alias": str, "filename": str, "rows": str,
+                                  "purpose": str, "key_field": str},
+                 ("alias", "filename", "rows", "purpose"), ("appended",), "write-target",
+                 ("lock", "conflict", "idempotent-claimed")),
+        NodeSpec("rows.soft_delete", {"alias": str, "filename": str, "field": str,
+                                        "value": str, "purpose": str, "key_field": str},
+                 ("alias", "filename", "field", "value", "purpose"), ("soft_deleted",), "write-target",
                  ("lock", "conflict", "idempotent-claimed")),
         NodeSpec("draft.create", {"record_key": str, "template_id": str, "destination": str},
                  ("record_key", "template_id", "destination"), ("draft_id",), "draft-create",

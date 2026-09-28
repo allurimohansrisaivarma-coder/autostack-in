@@ -1069,6 +1069,58 @@ def _topo_order(graph: dict) -> list[str]:
     return order
 
 
+def _append_rows_effect(db: Session, run_id: str, alias: str, filename: str, *,
+                        key_field: str, rows_data: list[dict], purpose: str,
+                        effect_ns: str) -> dict:
+    """Exactly-once keyed row append for a declared CSV resource (n8n-style row
+    operation, scoped to the safeio allowlist).
+
+    Journal claim per key BEFORE the write (same pattern as update_row_field):
+    a duplicate key is skipped with reason idempotent-claimed, so re-runs append
+    nothing twice. Staged atomic replace with backup; audited with the new row's
+    digest so rollback support is honest (the added row is known, not guessed).
+    """
+    import csv as _csv
+    import io as _io
+    from backend.security import safeio
+    lock = rows._rmw_lock(alias, filename)
+    added: list[str] = []
+    skipped_keys: list[str] = []
+    with lock:
+        current = safeio.read_resource(alias, filename).decode("utf-8-sig")
+        reader = list(_csv.reader(_io.StringIO(current)))
+        header, body = reader[0], reader[1:]
+        try:
+            ki = header.index(key_field)
+        except ValueError as exc:
+            raise rows.ClientDataError(f"missing column: {exc}") from exc
+        existing = {r[ki] for r in body if r and len(r) > ki}
+        pending: list[dict] = []
+        for r in rows_data:
+            kv = str(r.get(key_field, ""))
+            if not kv:
+                raise rows.ClientDataError(f"append row missing {key_field}")
+            effect = journal.effect_key(f"{key_field}:{kv}", purpose, effect_ns, alias)
+            if kv in existing or not journal.claim_effect(db, effect, run_id):
+                skipped_keys.append(kv)  # duplicate in-file or already claimed
+                continue
+            pending.append(r)
+            existing.add(kv)
+        for r in pending:
+            body.append([str(r.get(col, "")) for col in header])
+            added.append(str(r.get(key_field)))
+        if pending:
+            out = _io.StringIO()
+            _csv.writer(out).writerows([header, *body])
+            result = safeio.write_resource(alias, filename, out.getvalue().encode("utf-8"), backup=True)
+            audit_mod.append(db, "effect.applied", {"effect_key": f"{key_field}:{','.join(added)}",
+                                                    "kind": "rows_append", "sha256": result["sha256"],
+                                                    "run_id": run_id, "filename": filename,
+                                                    "purpose": purpose, "keys": added})
+            db.commit()
+    return {"appended": added, "skipped": skipped_keys}
+
+
 def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
                 run_date: str, filename: str, *, dry_run: bool = False,
                 params: dict | None = None) -> dict:
@@ -1097,6 +1149,12 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
     branch_skips: set[str] = set()
     would_update: list[str] = []
     would_draft: list[str] = []
+    would_append: list[str] = []
+    would_copy: list[str] = []
+    would_soft_delete: list[str] = []
+    applied_copied: list[str] = []
+    applied_appended: list[str] = []
+    applied_soft_deleted: list[str] = []
     for nid in _topo_order(graph):
         node = nodes[nid]
         ntype = node.get("type", "")
@@ -1121,6 +1179,19 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
                 table = [r for r in table
                          if eval_bool(where, {"row": r, "run_date": run_date, "params": params})]
                 detail = {"due": [r.get(plan.get("client_id_field", "ClientID")) for r in table]}
+            elif ntype == "data.aggregate":
+                # Read-only summary of the current table: count rows grouped by an
+                # optional field. No effect is applied, so there is nothing to claim
+                # in the journal and nothing to roll back.
+                field = params_n.get("field", "")
+                if field:
+                    groups: dict[str, int] = {}
+                    for r in table:
+                        k = str(r.get(field, "unknown"))
+                        groups[k] = groups.get(k, 0) + 1
+                    detail = {"summary": {"count": len(table), "grouped_by": field, "groups": groups}}
+                else:
+                    detail = {"summary": {"count": len(table)}}
             elif ntype == "control.branch":
                 cond = params_n.get("condition", "True")
                 taken = bool(eval_bool(cond, {"row": (table[0] if table else {}),
@@ -1150,6 +1221,96 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
                             new_value=new_value, purpose=purpose, effect_ns=run_date)
                         (skipped if res.get("skipped") else updated).append(str(kv))
                     detail = {"updated": updated, "skipped": skipped}
+            elif ntype == "file.copy":
+                from backend.security import safeio
+                from_alias = params_n.get("from_alias", alias)
+                from_filename = params_n.get("from_filename", filename)
+                to_alias = params_n.get("to_alias", from_alias)
+                to_filename = params_n.get("to_filename", "")
+                if not to_filename:
+                    raise rows.ClientDataError("file.copy: to_filename is required")
+                if dry_run:
+                    would_copy.append(f"{from_alias}/{from_filename} -> {to_alias}/{to_filename}")
+                    detail = {"dry_run": True, "would_copy": would_copy}
+                else:
+                    effect = journal.effect_key(f"file:{to_filename}", "file_copy", run_date, to_alias)
+                    if not journal.claim_effect(db, effect, run.id):
+                        detail = {"skipped": True, "reason": "idempotent-claimed"}
+                    else:
+                        data = safeio.read_resource(from_alias, from_filename)
+                        res = safeio.write_resource(to_alias, to_filename, data, backup=True)
+                        journal.mark_applied(db, effect)
+                        audit_mod.append(db, "effect.applied", {"effect_key": effect, "kind": "file_copy",
+                                                                "sha256": res["sha256"], "run_id": run.id,
+                                                                "from": f"{from_alias}/{from_filename}",
+                                                                "to": f"{to_alias}/{to_filename}"})
+                        db.commit()
+                        applied_copied.append(f"{to_alias}/{to_filename}")
+                        detail = {"copied": f"{to_alias}/{to_filename}", "sha256": res["sha256"]}
+            elif ntype == "file.archive":
+                from backend.security import safeio
+                arch_alias = params_n.get("alias", alias)
+                arch_name = params_n.get("filename", filename)
+                dated = datetime.now(timezone.utc).strftime("archive-%Y-%m-%d")
+                if dry_run:
+                    would_copy.append(f"{arch_alias}/{arch_name} -> {arch_alias}/{dated}/{arch_name}")
+                    detail = {"dry_run": True, "would_copy": would_copy}
+                else:
+                    effect = journal.effect_key(f"file:{arch_name}", "file_archive", run_date, arch_alias)
+                    if not journal.claim_effect(db, effect, run.id):
+                        detail = {"skipped": True, "reason": "idempotent-claimed"}
+                    else:
+                        data = safeio.read_resource(arch_alias, arch_name)
+                        res = safeio.write_resource(arch_alias, f"{dated}/{arch_name}", data, backup=False)
+                        journal.mark_applied(db, effect)
+                        audit_mod.append(db, "effect.applied", {"effect_key": effect, "kind": "file_archive",
+                                                                "sha256": res["sha256"], "run_id": run.id,
+                                                                "archived_to": f"{arch_alias}/{dated}/{arch_name}"})
+                        db.commit()
+                        applied_copied.append(f"{arch_alias}/{dated}/{arch_name}")
+                        detail = {"archived": f"{arch_alias}/{dated}/{arch_name}", "sha256": res["sha256"]}
+            elif ntype == "rows.append":
+                key_field = params_n.get("key_field", plan.get("client_id_field", "ClientID"))
+                raw = params_n.get("rows", "")
+                parsed = json.loads(raw) if raw else []
+                if isinstance(parsed, dict):
+                    parsed = [parsed]
+                append_purpose = params_n.get("purpose", "rows_append")
+                if dry_run:
+                    would_append.extend(str(r.get(key_field)) for r in parsed if r.get(key_field) is not None)
+                    detail = {"dry_run": True, "would_append": would_append}
+                else:
+                    res = _append_rows_effect(db, run.id, params_n.get("alias", alias),
+                                              params_n.get("filename", filename), key_field=key_field,
+                                              rows_data=parsed, purpose=append_purpose, effect_ns=run_date)
+                    applied_appended.extend(res["appended"])
+                    detail = res
+            elif ntype == "rows.soft_delete":
+                set_clause = f"{params_n.get('field', 'Status')}={params_n.get('value', 'Deleted')}"
+                field, _, literal = set_clause.partition("=")
+                field = field.strip()
+                new_value = literal.strip().strip("\"'")
+                key_field = params_n.get("key_field", plan.get("client_id_field", "ClientID"))
+                soft_purpose = params_n.get("purpose", "soft_delete")
+                if dry_run:
+                    would_soft_delete.extend(str(r.get(key_field)) for r in table if r.get(key_field) is not None)
+                    detail = {"dry_run": True, "would_soft_delete": would_soft_delete}
+                else:
+                    sd_alias = params_n.get("alias", alias)
+                    sd_filename = params_n.get("filename", filename)
+                    for r in table:
+                        kv = r.get(key_field)
+                        if kv is None:
+                            continue
+                        res = rows.update_row_field(
+                            db, run_id=run.id, alias=sd_alias, filename=sd_filename,
+                            key_field=key_field, key_value=str(kv), field=field,
+                            new_value=new_value, purpose=soft_purpose, effect_ns=run_date)
+                        if res.get("skipped"):
+                            skipped.append(str(kv))
+                        else:
+                            applied_soft_deleted.append(str(kv))
+                    detail = {"soft_deleted": applied_soft_deleted, "skipped": skipped}
             elif ntype == "draft.create":
                 id_field = plan.get("client_id_field", "ClientID")
                 template_id = params_n.get("template_id", "followup_en")
@@ -1212,10 +1373,15 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
         db.commit()
         if error and node.get("on_fail") != "continue":
             raise RuntimeError(f"node {nid} failed: {error}") from error_exc
-    result = {"updated": updated, "drafted": drafted, "skipped": skipped, "notified": notified}
+    result = {"updated": updated, "drafted": drafted, "skipped": skipped, "notified": notified,
+              "appended": applied_appended, "copied": applied_copied,
+              "soft_deleted": applied_soft_deleted}
     if dry_run:
         result["would_update"] = would_update
         result["would_draft"] = would_draft
+        result["would_append"] = would_append
+        result["would_copy"] = would_copy
+        result["would_soft_delete"] = would_soft_delete
     return result
 
 

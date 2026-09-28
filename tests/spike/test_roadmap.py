@@ -348,6 +348,118 @@ def test_rollback_restores_prior_values_exactly_once(client):
     assert "Follow-up due" in content  # statuses restored to prior values
 
 
+def test_file_copy_node_copies_within_allowlist(client):
+    """file.copy stages a byte-identical copy into a declared alias; the effect is
+    journaled exactly-once and the node is honest about the copy in its record."""
+    _post(client, "/api/resources/stage", {"fixture": "clients-before.csv", "as_filename": "src-e.csv"})
+    graph = {"nodes": [
+        {"id": "c", "type": "file.copy", "params": {"from_alias": "sample-tracking-file",
+                                                       "from_filename": "src-e.csv",
+                                                       "to_alias": "spike-scratch",
+                                                       "to_filename": "copy-e.csv"}},
+    ], "edges": []}
+    wf = _post(client, "/api/workflows", {"id": f"wf-cp-{uuid.uuid4().hex[:6]}",
+                                          "name": "copy", "graph": graph})
+    assert wf.status_code == 200, wf.text
+    wid = wf.json()["workflow_id"]
+    r = _post(client, "/api/runs", {"workflow_id": wid, "run_date": "2026-09-20", "filename": "clients.csv"})
+    assert r.status_code == 200, r.text
+    assert r.json()["copied"], r.json()
+    from backend.security.safeio import read_resource
+    assert read_resource("sample-tracking-file", "src-e.csv") == read_resource("spike-scratch", "copy-e.csv")
+    # re-run: exactly-once journal holds the claim — nothing is copied again
+    r2 = _post(client, "/api/runs", {"workflow_id": wid, "run_date": "2026-09-20", "filename": "clients.csv"})
+    assert r2.status_code == 200
+    assert r2.json()["copied"] == [], r2.json()
+    from backend.security.safeio import read_resource
+    assert read_resource("sample-tracking-file", "src-e.csv") == read_resource("spike-scratch", "copy-e.csv")
+
+
+def test_file_archive_node_writes_dated_snapshot(client):
+    """file.archive adds a dated sibling (archive-YYYY-MM-DD/<name>) inside the SAME
+    alias; the source file is untouched."""
+    _post(client, "/api/resources/stage", {"fixture": "clients-before.csv", "as_filename": "arch-e.csv"})
+    graph = {"nodes": [
+        {"id": "a", "type": "file.archive", "params": {"alias": "sample-tracking-file", "filename": "arch-e.csv"}},
+    ], "edges": []}
+    wf = _post(client, "/api/workflows", {"id": f"wf-ar-{uuid.uuid4().hex[:6]}",
+                                          "name": "archive", "graph": graph})
+    assert wf.status_code == 200, wf.text
+    wid = wf.json()["workflow_id"]
+    r = _post(client, "/api/runs", {"workflow_id": wid, "run_date": "2026-09-20", "filename": "clients.csv"})
+    assert r.status_code == 200, r.text
+    archived_to = r.json()["copied"][0]
+    assert archived_to.startswith("sample-tracking-file/archive-") and archived_to.endswith("/arch-e.csv")
+    from datetime import datetime
+    from backend.security.safeio import read_resource
+    folder = archived_to.split("/")[1]
+    datetime.strptime(folder, "archive-%Y-%m-%d")  # well-formed dated folder
+    assert read_resource("sample-tracking-file", "arch-e.csv") == read_resource("sample-tracking-file", f"{folder}/arch-e.csv")
+
+
+def test_rows_append_is_exactly_once_and_duplicate_safe(client):
+    """rows.append adds keyed rows; duplicate keys are skipped by the journal so a
+    re-run appends nothing twice."""
+    _post(client, "/api/resources/stage", {"fixture": "clients-before.csv", "as_filename": "app-e.csv"})
+    graph = {"nodes": [
+        {"id": "a", "type": "rows.append", "params": {
+            "alias": "sample-tracking-file", "filename": "app-e.csv",
+            "rows": "[{\"ClientID\": \"C900\", \"Name\": \"New Client\", \"Status\": \"Onboarding\"}]",
+            "purpose": "onboarding_append", "key_field": "ClientID"}},
+    ], "edges": []}
+    wf = _post(client, "/api/workflows", {"id": f"wf-ap-{uuid.uuid4().hex[:6]}",
+                                          "name": "append", "graph": graph})
+    assert wf.status_code == 200, wf.text
+    wid = wf.json()["workflow_id"]
+    r = _post(client, "/api/runs", {"workflow_id": wid, "run_date": "2026-09-20", "filename": "clients.csv"})
+    assert r.status_code == 200, r.text
+    assert r.json()["appended"] == ["C900"], r.json()
+    from backend.security.safeio import read_resource
+    content = read_resource("sample-tracking-file", "app-e.csv").decode("utf-8-sig")
+    assert "C900" in content
+    count_first = content.count("C900")
+    # re-run: the claim is held -> the row is skipped, not appended twice
+    r2 = _post(client, "/api/runs", {"workflow_id": wid, "run_date": "2026-09-20", "filename": "clients.csv"})
+    assert r2.status_code == 200
+    content2 = read_resource("sample-tracking-file", "app-e.csv").decode("utf-8-sig")
+    assert content2.count("C900") == count_first
+    # a DIFFERENT run_date claims fresh -> in-file duplicate is skipped by key, not the journal
+    r3 = _post(client, "/api/runs", {"workflow_id": wid, "run_date": "2027-01-01", "filename": "clients.csv"})
+    assert r3.status_code == 200
+    content3 = read_resource("sample-tracking-file", "app-e.csv").decode("utf-8-sig")
+    assert content3.count("C900") == count_first  # never grows past one copy
+
+
+def test_rows_soft_delete_flags_and_rollback_restores(client):
+    """rows.soft_delete rewrites a status field (never destroys data) and the run can
+    be rolled back to the prior values — the honest inverse path."""
+    _post(client, "/api/resources/stage", {"fixture": "clients-before.csv", "as_filename": "sd-e.csv"})
+    graph = {"nodes": [
+        {"id": "r", "type": "file.read_table", "params": {"alias": "sample-tracking-file"}},
+        {"id": "f", "type": "data.filter", "params": {"from": "rows", "where": "row.Status == 'Follow-up due' and row.FollowUpDate <= run_date"}},
+        {"id": "s", "type": "rows.soft_delete", "params": {"alias": "sample-tracking-file", "filename": "sd-e.csv",
+                                                             "field": "Status", "value": "Deleted",
+                                                             "purpose": "cleanup", "key_field": "ClientID"}},
+    ], "edges": [{"from": "r", "to": "f"}, {"from": "f", "to": "s"}]}
+    wf = _post(client, "/api/workflows", {"id": f"wf-sd-{uuid.uuid4().hex[:6]}",
+                                          "name": "softdel", "graph": graph})
+    assert wf.status_code == 200, wf.text
+    wid = wf.json()["workflow_id"]
+    run_date = _unique_run_date()
+    r = _post(client, "/api/runs", {"workflow_id": wid, "run_date": run_date, "filename": "sd-e.csv"})
+    assert r.status_code == 200, r.text
+    assert sorted(r.json()["soft_deleted"]) == ["C001", "C003"], r.json()
+    from backend.security.safeio import read_resource
+    content = read_resource("sample-tracking-file", "sd-e.csv").decode("utf-8-sig")
+    assert "Deleted" in content and "C001" in content  # rows still present, flagged
+    # rollback restores the prior status values
+    rb = _post(client, f"/api/runs/{r.json()['run_id']}/rollback")
+    assert rb.status_code == 200, rb.text
+    assert sorted(rb.json()["restored_rows"]) == ["C001", "C003"]
+    content2 = read_resource("sample-tracking-file", "sd-e.csv").decode("utf-8-sig")
+    assert "Follow-up due" in content2
+
+
 # ── Phase F: governance ──────────────────────────────────────────────────────
 
 def test_audit_export_and_compliance_bundle(client):
@@ -445,13 +557,41 @@ def test_privacy_export_contains_real_rows(client):
     assert "exported_at" in body and isinstance(body["drafts"], list) and isinstance(body["runs"], list)
 
 
+def test_node_catalog_mirrors_validator(client):
+    """The capability surface (Create Automation / Connectors) is driven by the
+    SAME catalog the graph validator enforces — the UI can never advertise a
+    node the executor would refuse."""
+    r = client.get("/api/nodes/catalog")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    types = {n["type"] for n in body["nodes"]}
+    assert {"file.read_table", "data.filter", "data.aggregate", "file.update_rows",
+            "file.copy", "file.archive", "rows.append", "rows.soft_delete",
+            "draft.create", "notify.desktop", "control.branch", "approval.gate"} <= types
+    # file ops are write-permission nodes, grouped for the capability surface
+    fcopy = next(n for n in body["nodes"] if n["type"] == "file.copy")
+    assert fcopy["permission"] == "write-target" and fcopy["group"] == "File ops"
+    rapp = next(n for n in body["nodes"] if n["type"] == "rows.append")
+    assert "key_field" in rapp["optional_params"]
+    # permission-bearing nodes carry their permission (approval gate = activate)
+    gate = next(n for n in body["nodes"] if n["type"] == "approval.gate")
+    assert gate["permission"] == "activate"
+    agg = next(n for n in body["nodes"] if n["type"] == "data.aggregate")
+    assert agg["group"] == "Transform"
+
+
 def test_connectors_measured_not_stickered(client):
     r = client.get("/api/connectors", headers=SERVICE)
     assert r.status_code == 200, r.text
     items = {c["id"]: c for c in r.json()["connectors"]}
-    assert {"excel", "csv", "ai_gemini", "nodered", "email", "cloud_sync"} == set(items.keys())
+    # Core six + the honest expansion entries (webhook/browser supported-limited,
+    # outbound HTTP + mailbox reading explicitly unavailable — never faked).
+    assert {"excel", "csv", "ai_gemini", "nodered", "email", "cloud_sync",
+            "webhook_in", "browser", "http_request", "email_in"} == set(items.keys())
     # email is never available (product promise: drafts only)
     assert items["email"]["status"] == "unavailable"
+    # outbound HTTP is hard-blocked by the sandbox design — never "supported"
+    assert items["http_request"]["status"] == "unavailable"
     # AI status reflects the real environment (mock provider -> limited)
     assert items["ai_gemini"]["status"] == ("supported" if items["ai_gemini"].get("detail") == "" else "limited")
     # every connector states both boundaries

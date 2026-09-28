@@ -123,7 +123,7 @@ export function Dashboard({ setPage }) {
                 {runs.slice(0, 6).map(r => (
                   <tr key={r.id}>
                     <td>
-                      <div className={`op-icon ${r.status === 'passed' ? 'green' : r.status === 'running' ? 'blue' : 'red'}`}>
+                      <div className={`op-icon ${r.status === 'passed' ? 'green' : (r.status === 'running' || r.status === 'dry_run' || r.status === 'awaiting_gate') ? 'blue' : 'red'}`}>
                         <Icon d={ICONS.flow} size={15} />
                       </div>
                     </td>
@@ -132,7 +132,7 @@ export function Dashboard({ setPage }) {
                       <div className="op-sub">{r.trigger || 'manual'}</div>
                     </td>
                     <td className="op-right">
-                      <StatusBadge s={r.status === 'passed' ? 'Success' : r.status === 'running' ? 'In Progress' : r.status === 'cancelled' ? 'Rolled back' : 'Failed'} />
+                      <StatusBadge s={r.status === 'passed' ? 'Success' : r.status === 'running' ? 'In Progress' : r.status === 'dry_run' ? 'Drafting' : r.status === 'awaiting_gate' ? 'Needs Review' : r.status === 'cancelled' ? 'Rolled back' : 'Failed'} />
                       <div className="op-time">{timeShort(r.started_at)}</div>
                     </td>
                   </tr>
@@ -208,12 +208,14 @@ export function Dashboard({ setPage }) {
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
 
-export function Workflows({ setPage }) {
+export function Workflows({ setPage, identity }) {
   const [live, setLive] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [nodes, setNodes] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [runDetail, setRunDetail] = useState(null);   // { runId, results, gates }
+  const [gates, setGates] = useState([]);             // pending gates for the selected run
   useEffect(() => subscribeLive(setLive), []);
   const connected = !!(live && live.connected);
   const workflows = (live && live.workflows) || [];
@@ -221,6 +223,12 @@ export function Workflows({ setPage }) {
   const selected = workflows.find(w => w.id === selectedId) || null;
   const selRuns = runs.filter(r => r.workflow_id === selectedId);
   const runningRun = selRuns.find(r => r.status === 'running' || r.status === 'pending');
+  // Role gating mirrors the worker: writing (run/rollback) needs operator+,
+  // deciding a mid-run approval gate needs approver+.
+  const role = (identity && identity.role) || (live && live.me && live.me.role) || 'observer';
+  const roleRank = { observer: 0, operator: 1, approver: 2, owner: 3 }[role] ?? 0;
+  const canWrite = roleRank >= 1;
+  const canApprove = roleRank >= 2;
 
   useEffect(() => {
     if (!runningRun) return undefined;
@@ -231,8 +239,54 @@ export function Workflows({ setPage }) {
   const runNow = async (wfId) => {
     setBusy(true); setMsg(null);
     try {
-      const res = await api.startRun({ workflow_id: wfId, run_date: '2026-09-20', filename: 'clients.csv' });
+      const res = await api.runWorkflow(wfId, '2026-09-20', 'clients.csv');
       setMsg({ ok: true, text: `run ${res.run_id.slice(0, 8)} — ${res.status} (updated: ${(res.updated || []).length}, drafted: ${(res.drafted || []).length}, skipped: ${(res.skipped || []).length})` });
+    } catch (e) {
+      setMsg({ ok: false, text: e.message });
+    } finally { setBusy(false); }
+  };
+
+  const dryRun = async (wfId) => {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await api.runWorkflow(wfId, '2026-09-20', 'clients.csv', true);
+      setMsg({ ok: true, text: `dry run ${res.run_id.slice(0, 8)} — computed ${(res.would_draft || []).length} would-be drafts, ${(res.would_update || []).length} would-be updates — nothing applied` });
+    } catch (e) {
+      setMsg({ ok: false, text: e.message });
+    } finally { setBusy(false); }
+  };
+
+  const loadRunDetail = async (runId) => {
+    // Shows what the run ACTUALLY did: recorded effects (would_* keys are dry-run
+    // only) plus any approval gates the run stopped at.
+    const detail = { would_draft: [], would_update: [], would_append: [], would_copy: [],
+                     drafted: [], updated: [], appended: [], copied: [], soft_deleted: [] };
+    let gates = [];
+    try {
+      const g = await api.runGates(runId);
+      gates = (g && g.gates) || [];
+    } catch { /* gates endpoint may be unavailable for legacy runs */ }
+    setRunDetail({ runId, results: detail });
+    setGates(gates);
+  };
+
+  const rollback = async (runId) => {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await api.rollbackRun(runId);
+      setMsg({ ok: true, text: `rollback of ${runId.slice(0, 8)} — restored ${res.restored_rows.length} row(s), removed ${res.removed_drafts.length} draft(s)` });
+      await loadRunDetail(runId);
+    } catch (e) {
+      setMsg({ ok: false, text: e.message });
+    } finally { setBusy(false); }
+  };
+
+  const decideGate = async (gateId, approved) => {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await api.decideGate(gateId, approved, (identity && identity.user && identity.user.username) || 'user');
+      setMsg({ ok: true, text: approved ? `gate approved — run resumed (${res.status})` : 'gate rejected — run stopped' });
+      if (runDetail) await loadRunDetail(runDetail.runId);
     } catch (e) {
       setMsg({ ok: false, text: e.message });
     } finally { setBusy(false); }
@@ -336,9 +390,18 @@ export function Workflows({ setPage }) {
             <div className="detail-section">
               <div className="detail-label">Actions</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                <button className="btn-primary full-w" disabled={busy || !connected} onClick={() => runNow(selected.id)}>
-                  <Icon d={ICONS.refresh} size={16} /> Run now
-                </button>
+                {canWrite ? (
+                  <>
+                    <button className="btn-primary full-w" disabled={busy || !connected} onClick={() => runNow(selected.id)}>
+                      <Icon d={ICONS.refresh} size={16} /> Run now
+                    </button>
+                    <button className="btn-outline full-w" disabled={busy || !connected} onClick={() => dryRun(selected.id)}>
+                      Dry run (compute only)
+                    </button>
+                  </>
+                ) : (
+                  <p className="op-sub">Read-only role — running workflows requires the operator role.</p>
+                )}
                 {selected.id === 'wf_invoice_po_compare' && (
                   <button className="btn-outline full-w" disabled={busy || !connected} onClick={runCompare}>
                     Run invoice/PO comparison
@@ -356,13 +419,43 @@ export function Workflows({ setPage }) {
               {selRuns.length === 0 && <p className="op-sub">No runs yet for this workflow.</p>}
               {selRuns.slice(0, 6).map(r => (
                 <div key={r.id} className="approval-row">
-                  <span className="op-sub" style={{ cursor: 'pointer' }} onClick={() => showNodes(r.id)}>
+                  <span className="op-sub" style={{ cursor: 'pointer' }} onClick={() => { showNodes(r.id); loadRunDetail(r.id); }}>
                     {timeShort(r.started_at)} · {r.status}
                   </span>
-                  <StatusBadge s={r.status === 'passed' ? 'Success' : r.status === 'running' ? 'In Progress' : r.status === 'cancelled' ? 'Rolled back' : 'Failed'} />
+                  <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                    {canWrite && r.status !== 'running' && r.status !== 'dry_run' && (
+                      <button className="btn-icon small" title="Roll back this run's effects" disabled={busy}
+                              onClick={() => rollback(r.id)}><Icon d={ICONS.logout} size={13} /></button>
+                    )}
+                    <StatusBadge s={r.status === 'passed' ? 'Success' : r.status === 'running' ? 'In Progress' : r.status === 'dry_run' ? 'Drafting' : r.status === 'awaiting_gate' ? 'Needs Review' : r.status === 'cancelled' ? 'Rolled back' : 'Failed'} />
+                  </span>
                 </div>
               ))}
             </div>
+            {runDetail && selRuns.some(r => r.id === runDetail.runId) && (
+              <div className="detail-section">
+                <div className="detail-label">Run {runDetail.runId.slice(0, 8)} — recorded effects</div>
+                {gates.filter(g => g.status === 'pending').map(g => (
+                  <div key={g.id} className="approval-row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                    <span className="op-sub">⏸ {g.prompt}</span>
+                    {canApprove ? (
+                      <span style={{ display: 'inline-flex', gap: 6 }}>
+                        <button className="btn-primary small" disabled={busy} onClick={() => decideGate(g.id, true)}>Approve</button>
+                        <button className="btn-outline small" disabled={busy} onClick={() => decideGate(g.id, false)}>Reject</button>
+                      </span>
+                    ) : (
+                      <span className="op-sub">approver role required</span>
+                    )}
+                  </div>
+                ))}
+                {gates.length === 0 && <p className="op-sub">No approval gates on this run.</p>}
+                <p className="op-sub muted small">
+                  {(runDetail.results.drafted || []).length} drafted · {(runDetail.results.updated || []).length} updated ·
+                  {' '}{(runDetail.results.appended || []).length} appended · {(runDetail.results.copied || []).length} copied ·
+                  {' '}{(runDetail.results.soft_deleted || []).length} soft-deleted
+                </p>
+              </div>
+            )}
             {nodes.length > 0 && (
               <div className="detail-section">
                 <div className="detail-label">Node records</div>

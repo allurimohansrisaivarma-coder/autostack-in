@@ -317,7 +317,9 @@ export function Settings({ identity, onExit, setPage }) {
   // Section state lives in the hash (#/settings/security) so refresh and
   // back/forward keep the current section — same contract as the app router.
   const sectionForHash = () => {
-    const h = (window.location.hash || '').replace(/^#/, '');
+    // Normalize the same way the app router does: '#/settings/security' (deep
+    // link with slash) and '#settings/security' resolve identically.
+    const h = (window.location.hash || '').replace(/^#/, '').replace(/^\/+/, '');
     const m = h.match(/^settings\/([a-z]+)/);
     return (m && SECTIONS.some(s => s.id === m[1])) ? m[1] : 'general';
   };

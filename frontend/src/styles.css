@@ -135,6 +135,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .user-name { font-size: 13px; font-weight: 600; color: var(--text); }
 .user-role { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+/* Meta block (name + role) is columnar everywhere it appears — in the nav pill
+   it previously rendered inline, colliding name and role onto one line. */
+.account-user-meta { display: flex; flex-direction: column; min-width: 0; }
 
 .theme-switch {
   display: flex;
@@ -268,7 +271,7 @@ body, .card, .main { transition: background 0.2s ease, color 0.2s ease, border-c
 .metric-bar-fill { height: 6px; width: 99.8%; background: var(--ok); border-radius: 99px; }
 
 /* ─── Layout helpers ─────────────────────────────────────────────────────────── */
-.two-col { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+.two-col { display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start; }
 
 /* ─── Ops table ──────────────────────────────────────────────────────────────── */
 .ops-table { width: 100%; border-collapse: collapse; }
@@ -793,6 +796,9 @@ body, .card, .main { transition: background 0.2s ease, color 0.2s ease, border-c
   justify-content: space-between;
   gap: 10px;
 }
+/* Inside action rows, outline buttons size to their label — the generic
+   width:100% (for stacked panels) makes Back/Next sprawl across the row. */
+.step-actions .btn-outline, .publish-actions .btn-outline { width: auto; margin: 0; }
 
 /* ─── Dot ────────────────────────────────────────────────────────────────────── */
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
@@ -881,3 +887,31 @@ select { padding: 6px; border-radius: 8px; border: 1px solid var(--border-strong
 .conn-status.unavailable { color: var(--text-3); border-color: var(--chip-line); }
 .conn-status.blocked { color: var(--bad); border-color: var(--bad-line); }
 .field label { display: block; font-size: 12px; color: var(--text-3); margin-bottom: 4px; }
+
+/* ── Connectors page (n8n/Opal-style honest capability surface) ───────────── */
+.conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.conn-card { display: flex; flex-direction: column; gap: 10px; }
+.conn-card.conn-supported { border-color: color-mix(in srgb, var(--ok) 32%, var(--border)); }
+.conn-card.conn-limited { border-color: color-mix(in srgb, var(--warn) 32%, var(--border)); }
+.conn-card.conn-blocked { border-color: color-mix(in srgb, var(--bad) 32%, var(--border)); }
+.conn-card.conn-unavailable { opacity: 0.82; }
+.conn-lines { display: flex; flex-direction: column; gap: 7px; }
+.conn-line { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
+.conn-k {
+  flex: none; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 6px; margin-top: 1px;
+}
+.conn-k.ok { background: var(--good-bg); color: var(--ok-strong); }
+.conn-k.bad { background: var(--bad-soft); color: var(--bad-strong); }
+.conn-k.dim { background: var(--chip-bg); color: var(--text-3); }
+
+/* Node catalog chips (shared source of truth with the worker's validator) */
+.node-catalog { display: flex; flex-wrap: wrap; gap: 8px; }
+.node-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--border); background: var(--bg-elev);
+  border-radius: 9px; padding: 6px 10px; font-size: 12px;
+}
+.node-type { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--text); }
+.node-group { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.node-perm { font-size: 11px; opacity: 0.75; }

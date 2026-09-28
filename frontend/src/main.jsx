@@ -178,9 +178,11 @@ function NotFound({ setPage }) {
           <p className="muted">That link doesn't match any page in this workspace.</p>
         </div>
       </header>
-      <div style={{ display: 'flex', gap: 10 }}>
+      {/* .btn-outline is width:100% by default elsewhere — pin these to content
+          width so the recovery actions sit side by side, not stretched. */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button className="btn" onClick={() => setPage('dashboard')}>Go to Dashboard</button>
-        <button className="btn-outline" onClick={() => setPage('landing')}>Go to Home</button>
+        <button className="btn-outline" style={{ width: 'auto', margin: 0 }} onClick={() => setPage('landing')}>Go to Home</button>
       </div>
     </div>
   );
@@ -191,7 +193,9 @@ function App() {
   // reloads and every navigation writes a shareable hash. Unknown hashes render
   // NotFound (never a blank screen).
   const pageForHash = () => {
-    const h = (window.location.hash || '').replace(/^#/, '');
+    // Normalize: '#/dashboard' (documented deep-link form, with slash) and
+    // '#dashboard' (what setPage writes) must resolve to the same page.
+    const h = (window.location.hash || '').replace(/^#/, '').replace(/^\/+/, '');
     if (!h) return 'landing'; // root URL → landing homepage
     // Settings owns its sub-path (#/settings/<section>); the app router only
     // needs to know the context is "settings".
@@ -263,7 +267,7 @@ function App() {
     dashboard: <Dashboard setPage={setPage} />,
     discovery: <Discovery setPage={setPage} />,
     registry: <Registry identity={identity} />,
-    workflows: <Workflows setPage={setPage} />,
+    workflows: <Workflows setPage={setPage} identity={identity} />,
     create: <CreateAutomation setPage={setPage} />,
     trustlog: <TrustLog />,
   };

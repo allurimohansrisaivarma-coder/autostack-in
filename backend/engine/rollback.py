@@ -46,8 +46,10 @@ def rollback_run(db: Session, run_id: str) -> dict:
 
     for claim in claims:
         # effect_key layout: {key_field}:{key_value}|{purpose}|{run_date}|{alias}
-        # row-update purposes from the follow-up/compare workflows:
-        purposes = ("followup-draft", "status_update", "row_update")
+        # row-update purposes: the follow-up/compare workflows, the generic
+        # update_row_field purpose, and rows.soft_delete (value rewrites, never
+        # row destruction, so the inverse is a prior-value restore).
+        purposes = ("followup-draft", "status_update", "row_update", "soft_delete", "cleanup")
         if not any(f"|{p}|" in claim.effect_key for p in purposes):
             continue
         # find the audit entry that applied this effect (it carries the prior value)

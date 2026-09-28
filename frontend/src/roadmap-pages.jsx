@@ -247,7 +247,9 @@ export function Teams({ identity }) {
         {isOwner ? (
           <>
             <div className="field"><input placeholder="username of a local account" value={username} onChange={e => setUsername(e.target.value)} /></div>
-            <button className="primary" onClick={async () => { await api.teamAddMember(username, 'operator'); setUsername(''); refresh(); }}>Add as operator</button>
+            <button className="primary" disabled={!username.trim()} onClick={async () => {
+              try { await api.teamAddMember(username, 'operator'); setUsername(''); refresh(); } catch (e) { setErr(e.message); }
+            }}>Add as operator</button>
             <button className="link" onClick={async () => {
               const out = await api.teamCreateInvitation('approver');
               setInvite(out);
@@ -272,7 +274,7 @@ export function Teams({ identity }) {
         {isOwner && (
           <>
             <div className="field"><input placeholder="new process name" value={procName} onChange={e => setProcName(e.target.value)} /></div>
-            <button className="primary" onClick={async () => {
+            <button className="primary" disabled={!procName.trim()} onClick={async () => {
               setProcErr(null);
               try { await api.createProcess(procName); setProcName(''); refresh(); }
               catch (e) { setProcErr(e.message); }
@@ -312,12 +314,12 @@ export function Runners({ identity }) {
         {isOwner ? (
           <>
             <div className="field"><input placeholder="runner name" value={name} onChange={e => setName(e.target.value)} /></div>
-            <button className="primary" onClick={async () => {
+            <button className="primary" disabled={!name.trim()} onClick={async () => {
               setRegErr(null);
               try { await api.registerRunner(name || 'local-runner', 'local'); setName(''); refresh(); }
               catch (e) { setRegErr(e.message); }
             }}>Register local runner</button>
-            <button className="link" onClick={async () => {
+            <button className="link" disabled={!name.trim()} onClick={async () => {
               setRegErr(null);
               try {
                 const r = await api.registerRunner(name || 'office-runner', 'paired');
@@ -368,12 +370,30 @@ export function Scheduling({ identity }) {
   const [dates, setDates] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [err, setErr] = useState(null);
+  const [okMsg, setOkMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   async function refresh() {
     try { setWfs(await api.listWorkflows()); setTriggers(await api.triggers()); }
     catch (e) { setErr(e.message); }
   }
   useState(() => { refresh(); });
+
+  async function createSchedule() {
+    setErr(null); setOkMsg(null); setBusy(true);
+    try {
+      const config = {
+        observed_dates: dates.split(',').map(s => s.trim()).filter(Boolean),
+        user_confirmed: confirmed,
+      };
+      await api.createTrigger(wid, 'schedule', config, confirmed ? 'user-confirmed recurrence' : 'observed dates');
+      setOkMsg('Schedule created — enable it below to arm the trigger.');
+      // Reset the form so a second creation cannot silently reuse stale fields.
+      setWid(''); setDates(''); setConfirmed(false);
+      await refresh();
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  }
 
   return (
     <div className="screen">
@@ -398,17 +418,8 @@ export function Scheduling({ identity }) {
               <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
               I confirm this recurrence from real usage (not a demo cycle)
             </label>
-            <button className="primary" onClick={async () => {
-              setErr(null);
-              try {
-                const config = {
-                  observed_dates: dates.split(',').map(s => s.trim()).filter(Boolean),
-                  user_confirmed: confirmed,
-                };
-                await api.createTrigger(wid, 'schedule', config, confirmed ? 'user-confirmed recurrence' : 'observed dates');
-                refresh();
-              } catch (e) { setErr(e.message); }
-            }}>Create schedule</button>
+            <button className="primary" disabled={busy || !wid} onClick={createSchedule}>Create schedule</button>
+            {okMsg && <div className="token-reveal" role="status"><strong>{okMsg}</strong></div>}
             <p className="muted">Schedules need 3+ distinct observed dates or explicit confirmation — enforced by the worker.</p>
           </>
         ) : (
@@ -420,7 +431,7 @@ export function Scheduling({ identity }) {
           <Row key={t.id}>
             <div>{t.kind} → {t.workflow_id} {t.enabled ? '' : '(disabled)'}</div>
             {canManage && (
-              <button className="link" onClick={async () => { try { await (t.enabled ? api.disableTrigger(t.id) : api.enableTrigger(t.id)); refresh(); } catch (e) { setErr(e.message); } }}>
+              <button className="link" onClick={async () => { setErr(null); try { await (t.enabled ? api.disableTrigger(t.id) : api.enableTrigger(t.id)); refresh(); } catch (e) { setErr(e.message); } }}>
                 {t.enabled ? 'disable' : 'enable'}
               </button>
             )}

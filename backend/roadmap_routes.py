@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend import entitlements, identity, orchestration, teams
+from backend.engine.catalog import CATALOG
 from backend.db import SessionLocal
 from backend.models import (Approval, AuditEntry, Draft, Membership, Process,
                             RegistryEvent, RegistryImport, Run, Setting, User,
@@ -178,6 +179,43 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
 # Organization context catalog (product §5): the create flow's cascading
 # selectors are driven entirely by this catalog — one source of truth shared
 # with backend/teams.py validation. Kept here (not hardcoded in the UI).
+@router.get("/nodes/catalog")
+def node_catalog():
+    """The workflow node catalog — the SAME source of truth the graph validator
+    (engine/catalog.py) enforces at bind time. Powers the Create Automation
+    capability surface and the Connectors page; the UI can never advertise a
+    node the executor would refuse. Public like /org/catalog (pre-login wizard)."""
+    groups = {
+        "file.read_table": "Read",
+        "data.filter": "Transform",
+        "data.aggregate": "Transform",
+        "file.update_rows": "Write",
+        "file.copy": "File ops",
+        "file.archive": "File ops",
+        "rows.append": "Write",
+        "rows.soft_delete": "Write",
+        "draft.create": "Write",
+        "notify.desktop": "Notify",
+        "control.branch": "Control flow",
+        "approval.gate": "Governance",
+    }
+    return {
+        "nodes": [
+            {
+                "type": spec.type,
+                "group": groups.get(spec.type, "Other"),
+                "required_params": list(spec.required),
+                "optional_params": [p for p in spec.params if p not in spec.required],
+                "outputs": list(spec.outputs),
+                "permission": spec.permission,
+                "errors": list(spec.errors),
+            }
+            for spec in CATALOG.values()
+        ],
+        "note": "validated at bind time by the worker; the UI only mirrors this catalog",
+    }
+
+
 @router.get("/org/catalog")
 def org_catalog():
     """Organization types, per-type sizes, departments, and per-department
@@ -909,6 +947,34 @@ def connectors_inventory(db: Session = Depends(get_db)):
             "detail": "in-process runtime on 127.0.0.1:18790 with AutoStack bridge nodes",
             "can_see": "flows the user deploys inside this app",
             "cannot_see": "other Node-RED instances",
+        },
+        {
+            "id": "webhook_in", "name": "Inbound webhooks",
+            "status": "supported",
+            "detail": "per-trigger secret header (X-AutoStack-Secret), rate-limited, audited",
+            "can_see": "the POST body of a trigger the owner enabled",
+            "cannot_see": "anything else on the caller's network",
+        },
+        {
+            "id": "http_request", "name": "Outbound HTTP requests",
+            "status": "unavailable",
+            "detail": "by design: generated code runs in a network-blocked sandbox; no egress connector exists yet",
+            "can_see": "nothing",
+            "cannot_see": "the internet — sockets are hard-blocked in the sandbox",
+        },
+        {
+            "id": "email_in", "name": "Email reading",
+            "status": "unavailable",
+            "detail": "not implemented: mailbox capture is future work",
+            "can_see": "nothing",
+            "cannot_see": "mailboxes, credentials, contacts",
+        },
+        {
+            "id": "browser", "name": "Browser observation",
+            "status": "limited",
+            "detail": "synthetic contract capture only (phase-1 spike); no live page reading",
+            "can_see": "contract-shaped events staged through the capture API",
+            "cannot_see": "real browsing sessions, passwords, page pixels",
         },
         {
             "id": "email", "name": "Email sending",

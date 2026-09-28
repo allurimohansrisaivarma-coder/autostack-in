@@ -26,16 +26,28 @@ def _ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
+# Dated archive subfolders only: resolve_resource() accepts exactly this one nested
+# shape ("archive-YYYY-MM-DD/<plain-name>") so file.archive can file snapshots into
+# a dated folder without reopening the resolver to arbitrary nesting.
+_DATED_ARCHIVE = "archive-"
+
+
 def resolve_resource(alias: str, filename: str) -> Path:
     """Resolve alias+filename safely: reject traversal, absolute paths, symlinks/junctions.
 
-    Raises PermissionError on any escape attempt (S5 fail-closed).
+    Raises PermissionError on any escape attempt (S5 fail-closed). The only nested
+    form allowed is a first-level dated archive folder (see _DATED_ARCHIVE).
     """
     _ensure_dirs()
     if alias not in RESOURCE_DIRS:
         raise PermissionError(f"unknown resource alias: {alias}")
     base = RESOURCE_DIRS[alias].resolve()
-    if not filename or Path(filename).name != filename or filename in {".", ".."}:
+    if not filename or filename in {".", ".."}:
+        raise PermissionError(f"unsafe filename: {filename!r}")
+    parts = [p for p in Path(filename).parts if p not in ("", ".")]
+    if len(parts) == 2 and parts[0].startswith(_DATED_ARCHIVE) and Path(parts[1]).name == parts[1]:
+        filename = str(Path(*parts))
+    elif Path(filename).name != filename:
         raise PermissionError(f"unsafe filename: {filename!r}")
     candidate = (base / filename)
     # Reject symlink/junction components anywhere under the resource dir.
@@ -66,6 +78,9 @@ def write_resource(alias: str, filename: str, data: bytes, *, backup: bool = Tru
     """
     path = resolve_resource(alias, filename)
     _ensure_dirs()
+    # Dated archive subfolder may not exist yet — create it (resolver already
+    # confined the path inside the resource directory).
+    path.parent.mkdir(parents=True, exist_ok=True)
     existed = path.exists()
     if existed and backup:
         shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))

@@ -9,6 +9,10 @@
    shadows, glows or filters on any state (see scripts/process_logos.py). */
 .theme-logo {
   display: inline-flex; align-items: center; position: relative; flex-shrink: 0;
+  /* Default height for slots that don't set one; context rules below override
+     per placement (nav pills, sheet, hero anchors). JSX passes no inline height
+     unless a caller pins an exact size. */
+  height: 26px;
 }
 .theme-logo img { height: 100%; width: auto; display: block; }
 .theme-logo .logo-dark { display: none; }
@@ -138,6 +142,9 @@ html[data-fx="reduced"] .floating-nav { border-color: var(--border-strong); }
 }
 .landing-nav .ln-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .landing-nav .ln-brand .theme-logo { height: 36px; }
+/* Floating app pill: keep the lockup at the same optical size as the public
+   pill so one navbar design reads identically on both. */
+.fn-brand .theme-logo { height: 30px; }
 .landing-nav .ln-brand .theme-logo img { filter: none; box-shadow: none; }
 .landing-nav .ln-links { display: flex; gap: 2px; }
 .ln-link {
@@ -203,6 +210,40 @@ html[data-fx="dark"] .btn-hero, [data-theme="dark"] .btn-hero { color: #0b1220; 
   border-radius: 20px; overflow: hidden;
 }
 .hero-strip img { width: 100%; display: block; border-radius: inherit; box-shadow: 0 30px 80px rgba(15, 23, 42, 0.25); }
+
+/* Terminals are always left-aligned documents, even inside centered heroes:
+   .hero/.final-cta set text-align:center, and the exec-band lives in the hero,
+   so the terminal body inherited it. Pin the whole terminal to start. */
+.exec-band, .exec-band .term,
+.container-scroll .term, .cs-frame .term { text-align: left; }
+.exec-band .term-line, .exec-band .term-bar,
+.cs-frame .term-line, .cs-frame .term-bar { text-align: left; }
+.exec-band .term-body, .cs-frame .term-body {
+  text-align: left;
+  /* Terminal is the framed artifact inside these frames: size to content so a
+     6-line transcript doesn't leave a huge dead box (was a fixed 280px). */
+  height: auto; min-height: 150px; max-height: 320px;
+  padding: 14px 16px 16px;
+}
+/* Exec-band internal alignment: give both columns deliberate, matching
+   paddings and vertical centering so neither side looks floats. */
+.exec-band { border-radius: 20px; }
+.exec-band .exec-copy { padding: 34px 36px; text-align: left; }
+.exec-band .exec-copy h3 { margin: 0; }
+.exec-band .exec-copy p { margin: 0; }
+.exec-band .exec-term .term-bar { border-top-left-radius: 0; }
+/* Column balance: the copy side slightly outweighs the terminal side so the
+   terminal keeps comfortable line length instead of squeezing. */
+.exec-band { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); }
+@media (max-width: 1024px) {
+  .exec-band { grid-template-columns: 1fr; }
+}
+/* ContainerScroll frame: cap the product window to the reading column so the
+   terminal doesn't stretch edge-to-edge with dead space on wide screens. */
+.container-scroll { max-width: 1120px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+.cs-frame .term-body { height: auto; min-height: 220px; max-height: 360px; }
+/* ─── Auth / sign-in hero (marker: keep single source above) ──────────────── */
+.auth-points { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 
 /* ─── Landing: chapters ─────────────────────────────────────────────────────── */
 .chapter { position: relative; padding: 110px 24px; max-width: 1160px; margin: 0 auto; }
@@ -308,8 +349,16 @@ html[data-fx="dark"] .btn-hero, [data-theme="dark"] .btn-hero { color: #0b1220; 
 .auth-hero .ah-copy { display: flex; flex-direction: column; gap: 20px; align-items: flex-start; }
 .auth-hero .ah-copy h1 { font-size: clamp(34px, 4.6vw, 54px); letter-spacing: -0.035em; line-height: 1.06; font-weight: 700; }
 .auth-hero .ah-copy p { color: var(--text-2); font-size: 16px; line-height: 1.6; max-width: 46ch; }
-.auth-hero .ah-brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 16px; }
-.auth-hero .ah-brand .theme-logo { height: 44px; }
+/* ─── Auth / sign-in hero ───────────────────────────────────────────────────
+   The lockup above the headline is the page's brand anchor: give it real
+   presence (the old 44px mark read as a footnote) and legible text at every
+   viewport. The mark stays metallic; text color follows the theme asset
+   (light → dark text, dark → white text). No glow, no filters. */
+.auth-hero .ah-brand { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+.auth-hero .ah-brand .theme-logo { height: clamp(88px, 12vw, 132px); }
+.auth-hero .ah-brand .theme-logo img { filter: none; box-shadow: none; }
+.auth-hero .ah-copy { align-items: stretch; }
+.auth-hero .ah-copy h1 { margin: 0; max-width: 15ch; }
 .auth-points { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 .auth-points .ap { display: flex; gap: 10px; align-items: center; font-size: 14px; color: var(--text-2); }
 .auth-points .ap svg { color: var(--ok); flex-shrink: 0; }
@@ -526,7 +575,9 @@ html[data-theme="light"] .cs-frame { box-shadow: 0 40px 80px -30px rgba(15, 23, 
 .floating-nav.scrolled { box-shadow: 0 12px 32px -14px rgba(2, 6, 23, 0.35); }
 html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px rgba(15, 23, 42, 0.25); }
 
-.nav-burger { display: none; }
+/* Burger hidden on desktop (inline-flex beats display:none at equal
+   specificity, so the hiding rule must outrank the base .nav-icon-btn). */
+.nav-burger { display: none !important; }
 .fn-brand { display: inline-flex; align-items: center; padding: 4px 6px; border-radius: 10px; background: none; border: none; cursor: pointer; }
 .fn-brand .theme-logo { height: 30px; }
 .fn-brand .theme-logo img { filter: none; box-shadow: none; }
@@ -626,7 +677,19 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
   display: inline-flex; align-items: center; gap: 8px;
   padding: 4px 9px 4px 4px; border-radius: 999px; border: 1px solid transparent;
   background: none; cursor: pointer; transition: background 0.16s ease, border-color 0.16s ease;
+  max-width: 220px;
 }
+/* Name and role are separate lines inside .account-user-meta — keep the meta
+   block columnar inside the pill so long names wrap instead of colliding. */
+.nav-account-trigger .account-user-meta {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  min-width: 0; line-height: 1.25;
+}
+.nav-account-trigger .user-name {
+  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 130px;
+}
+.nav-account-trigger .user-role { font-size: 10.5px; white-space: nowrap; }
 .nav-account-trigger:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
 .nav-account-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .nav-account-trigger .avatar { width: 28px; height: 28px; font-size: 11px; }
@@ -693,7 +756,9 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
    Quieter than the marketing page: hero copy + real CTAs + quick tiles. */
 .app-home { padding-top: 40px; }
 .app-home .ah-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 18px; padding: 46px 0 40px; }
-.app-home .ah-brand .theme-logo { height: 64px; }
+/* In-app home hero: same headline as the auth hero → same brand weight. */
+.app-home .ah-brand { margin-bottom: 2px; }
+.app-home .ah-brand .theme-logo { height: clamp(72px, 9vw, 104px); }
 .app-home .ah-title { font-size: clamp(32px, 4.2vw, 48px); letter-spacing: -0.03em; line-height: 1.08; font-weight: 700; margin: 0; }
 .app-home .ah-sub { color: var(--text-2); font-size: 16px; line-height: 1.6; max-width: 58ch; margin: 0 auto; }
 .app-home .ah-ctas { justify-content: center; margin-top: 6px; }
@@ -874,7 +939,7 @@ button.primary:not(:disabled):active { transform: scale(0.98); }
      bell · account), never a full-width strip — one navbar design everywhere. */
   .floating-nav { width: fit-content; top: 8px; height: 54px; }
   .fn-groups { display: none; }
-  .nav-burger { display: inline-flex; }
+  .nav-burger { display: inline-flex !important; }
   .nav-kbd { display: none; }
   .nav-account-trigger .account-user-meta { display: none; }
   .worker-dot { display: none; }

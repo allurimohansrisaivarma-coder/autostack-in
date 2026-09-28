@@ -42,7 +42,11 @@ export function CreateAutomation({ setPage }) {
   const [ctxDept, setCtxDept] = useState('finance');
   const [ctxProcess, setCtxProcess] = useState('accounts_payable');
   const [ctxOther, setCtxOther] = useState('');
+  const [nodes, setNodes] = useState(null);
   useEffect(() => { api.orgCatalog().then(setCatalog).catch(() => setCatalog(null)); }, []);
+  // Node catalog: the worker's own validated node set — drives the capability
+  // chips in step 4 so the UI can never advertise a node the executor refuses.
+  useEffect(() => { api.nodeCatalog().then(setNodes).catch(() => setNodes(null)); }, []);
 
   // Reset downstream selections whenever an upstream context choice changes.
   useEffect(() => {
@@ -179,6 +183,9 @@ export function CreateAutomation({ setPage }) {
   const canApprove = rank === null || rank >= 2;
   const canPublish = rank === null || rank >= 3;
 
+  // Human-readable labels for the context summary chips.
+  const ctxLabel = (kind, v) => (catalog && catalog.labels?.[kind]?.[v]) || String(v || '—').replace(/_/g, ' ');
+
   return (
     <div className="screen">
       <div className="screen-header">
@@ -252,6 +259,15 @@ export function CreateAutomation({ setPage }) {
               <label>Capture surfaces
                 <select defaultValue="Tracking file (CSV)"><option>Tracking file (CSV)</option><option>Browser (synthetic contract)</option></select>
               </label>
+            </div>
+            <div className="ctx-summary" style={{ marginTop: 16 }}>
+              <div className="detail-label">Context summary (stored on the workflow)</div>
+              <div className="tag-row">
+                <span className="tag">{ctxLabel('org_type', ctxOrgType)}</span>
+                <span className="tag">{ctxLabel('size', ctxSize)}</span>
+                <span className="tag">{ctxLabel('department', ctxDept)}</span>
+                <span className="tag">{ctxOther.trim() ? ctxOther.trim() : ctxLabel('process_type', ctxProcess)}</span>
+              </div>
             </div>
           </div>
         )}
@@ -361,6 +377,33 @@ export function CreateAutomation({ setPage }) {
                 </div>
               ))}
             </div>
+            {nodes && nodes.nodes && (
+              <div className="detail-section">
+                <div className="detail-label">Worker node catalog ({nodes.nodes.length} types — validated at bind time)</div>
+                {/* Grouped by the catalog's own group field — n8n-style capability
+                    surface driven by the SAME source the validator enforces. */}
+                {(() => {
+                  const groups = [];
+                  for (const n of nodes.nodes) {
+                    const g = n.group || 'Other';
+                    if (!groups.includes(g)) groups.push(g);
+                  }
+                  return groups.map(g => (
+                    <div key={g} style={{ marginBottom: 10 }}>
+                      <div className="node-group" style={{ marginBottom: 6 }}>{g}</div>
+                      <div className="node-catalog">
+                        {nodes.nodes.filter(n => (n.group || 'Other') === g).map(n => (
+                          <span key={n.type} className="node-chip" title={n.permission ? `permission: ${n.permission}` : 'no special permission'}>
+                            <span className="node-type mono">{n.type}</span>
+                            {n.permission && <span className="node-perm" aria-label={`requires ${n.permission}`}>🔒</span>}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
             <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
               <button className="btn-outline" disabled={busy || !planId || !!artifact || !canPlan} onClick={generate}>1 · Generate</button>
               <button className="btn-outline" disabled={busy || !artifact || (job && job.status === 'passed') || !canApprove}

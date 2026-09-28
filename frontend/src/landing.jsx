@@ -355,7 +355,7 @@ export function AppHome({ setPage }) {
   return (
     <div className="screen app-home">
       <div className="ah-hero">
-        <Reveal><span className="ah-brand"><ThemeLogo h={64} /></span></Reveal>
+        <Reveal><span className="ah-brand"><ThemeLogo /></span></Reveal>
         <Reveal delay={0.08}>
           <h1 className="ah-title">Automation that earns <span className="grad">trust</span>.</h1>
         </Reveal>
@@ -410,7 +410,11 @@ export function AuthScreen({ children, onSignIn, onSignUp }) {
       )}
       <div className="auth-hero" style={{ position: 'relative', zIndex: 2 }}>
         <Reveal className="ah-copy">
-          <span className="ah-brand"><ThemeLogo h={44} /></span>
+          {/* Brand anchor above the headline: CSS-driven clamp (88–132px) so it
+              has real presence at every viewport. Light mode → metallic mark
+              + dark text; dark mode → metallic mark + white text (theme-        
+              switched asset, no filters or glow). */}
+          <span className="ah-brand"><ThemeLogo /></span>
           <h1>Automation that earns <span className="grad">trust</span>.</h1>
           <p>Your account lives on this machine — the first account administers it.
              Automations run in a sandbox and activate only after human approval.</p>

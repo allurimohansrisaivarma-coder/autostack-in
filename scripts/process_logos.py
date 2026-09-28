@@ -2,20 +2,20 @@
 
 Inputs (user-provided reference images):
   - light logo (SRC_LIGHT): metallic "A" + dark "AutoStack" wordmark on black
-    -> used in LIGHT theme (crisp treatment, exactly as supplied)
+    -> used in LIGHT theme (metallic mark + dark text)
   - dark logo (SRC_DARK): metallic "A" + white/glowing "AutoStack" on black
-    -> used in DARK theme (the glow IS the design; it is preserved)
+    -> used in DARK theme (metallic mark + white text)
 
 Outputs:
   - frontend/src/assets/autostack-{mark,lockup}-{light,dark}.png (transparent)
   - frontend/public/favicon-{light,dark}.png (mark-only favicons)
 
-Method (v4): the light source is floor-keyed crisp (opaque content, luminance
-stretch) exactly as in v3. The dark source keeps its baked-in glow through an
-emission matte (unmix against black): alpha = max-channel, color = rgb/alpha —
-the halo survives as semi-transparent pixels instead of being clipped away.
-The UI applies no filters to either variant; each asset already looks like its
-reference image on its own background.
+Method (v7): the light source is floor-keyed crisp (opaque content, luminance
+stretch). The DARK variant is derived from the SAME crisp light source and
+recolors it for dark surfaces: metallic "A" slightly brightened, wordmark
+pushed to white. The puffy dark-source image cannot be de-glowed (its halo is
+as bright as the letters — no key can separate them), so it is no longer used
+as a source. Both assets are crisp by construction; the UI applies no filters.
 """
 from PIL import Image
 import numpy as np
@@ -40,9 +40,15 @@ def autocrop(im, threshold=8):
     return im.crop(box)
 
 
-def key_crisp(path, floor=26.0, ramp=60.0, out_lo=55.0, span=150.0):
+def key_crisp(path, floor=12.0, ramp=40.0, out_lo=55.0, span=150.0):
     """LIGHT source: crisp keying — background keyed off, content fully opaque,
-    luminance stretched into a readable metallic range."""
+    luminance stretched into a readable metallic range.
+
+    v5 fix: the source's "AutoStack" wordmark is deliberately DIM dark-metallic
+    text (luminance ≈13–40 on a pure-black field). The old floor of 26 keyed
+    most of those strokes away, leaving a sparse, illegible caption. floor=12
+    keeps every wordmark stroke fully opaque while the pure-black background
+    (0–11) still keys clean — verified: the inter-band gap stays empty."""
     im = Image.open(path).convert("RGB")
     rgb = np.array(im).astype(np.float64)
     lum = rgb.max(axis=-1)
@@ -57,17 +63,43 @@ def key_crisp(path, floor=26.0, ramp=60.0, out_lo=55.0, span=150.0):
     return autocrop(Image.fromarray(out, "RGBA"))
 
 
-def key_glow(path, floor=6.0):
-    """DARK source: emission matte — the baked-in glow is the design. alpha =
-    max channel (dim pixels semi-transparent), color = emission recovered by
-    un-premultiplying against black. A tiny floor removes sensor noise."""
-    im = Image.open(path).convert("RGB")
-    rgb = np.array(im).astype(np.float64)
-    alpha = np.clip(rgb.max(axis=-1) - floor, 0.0, 255.0)
-    safe = np.maximum(rgb.max(axis=-1), 1.0)[..., None]
-    color = np.clip(rgb / safe * 255.0, 0, 255).astype(np.uint8)
-    out = np.dstack([color, alpha.astype(np.uint8)])
-    return autocrop(Image.fromarray(out, "RGBA"), threshold=4)
+def key_dark_from_light(path, floor=12.0, ramp=40.0, out_lo=55.0, span=150.0,
+                        mark_brighten=1.14, mark_lift=8.0):
+    """DARK variant derived from the CRISP light source (v7).
+
+    The puffy dark-source wordmark cannot be de-glowed — its halo is as bright
+    as the letters, so luminance keying either keeps the bloom or eats the
+    glyphs. Instead we reuse the light source's clean geometry (same metallic
+    "A", same wordmark shapes, fully opaque) and recolor for dark surfaces:
+      - mark region (above the same split line split_mark uses): metal tone
+        brightened a touch so it reads on near-black backgrounds;
+      - wordmark region (below the split): every stroke mapped to white
+        (235–255) with slight per-pixel variation retained so it doesn't band.
+    Alpha is untouched from the crisp key — no halo can exist by construction.
+    """
+    im = key_crisp(path, floor=floor, ramp=ramp, out_lo=out_lo, span=span)
+    arr = np.array(im)
+    rgb = arr[..., :3].astype(np.float64)
+    alpha = arr[..., 3]
+    h = arr.shape[0]
+    prof = alpha.max(axis=1)
+    lo, hi = int(h * 0.45), int(h * 0.75)
+    mark_bottom = lo + int(np.argmin(prof[lo:hi])) if hi > lo else int(h * 0.6)
+    lum = rgb.max(axis=-1)
+    word = np.zeros(lum.shape, dtype=bool)
+    word[mark_bottom + 2:, :] = True
+    visible = alpha > 0
+    wm = word & visible
+    metal = (~word) & visible
+    out = rgb.copy()
+    wl = lum[wm]
+    if wl.size:
+        span_wl = max(1.0, float(wl.max() - wl.min()))
+        target = 235.0 + (wl - wl.min()) / span_wl * 20.0  # 235–255 white
+        for c in range(3):
+            out[..., c][wm] = target
+    out[metal] = np.clip(rgb[metal] * mark_brighten + mark_lift, 0, 255)
+    return Image.fromarray(np.dstack([out.clip(0, 255).astype(np.uint8), alpha]), "RGBA")
 
 
 def split_mark(im):
@@ -87,8 +119,8 @@ def split_mark(im):
     return autocrop(mark)
 
 
-light = key_crisp(SRC_LIGHT, floor=26.0, ramp=60.0, out_lo=55.0, span=150.0)
-dark = key_glow(SRC_DARK, floor=6.0)
+light = key_crisp(SRC_LIGHT, floor=12.0, ramp=40.0, out_lo=55.0, span=150.0)
+dark = key_dark_from_light(SRC_LIGHT)  # v7: crisp geometry, recolored for dark
 
 for name, im in (("light", light), ("dark", dark)):
     lock = im.copy()

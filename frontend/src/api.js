@@ -150,4 +150,5 @@ export const api = {
   privacyExport: () => request('/api/privacy/export', { method: 'POST', body: {} }),
   connectors: () => request('/api/connectors'),
   aiMode: () => request('/api/system/ai-mode'),
+  nodeCatalog: () => request('/api/nodes/catalog'),
 };

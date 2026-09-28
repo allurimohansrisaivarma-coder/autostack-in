@@ -197,13 +197,24 @@ export function DataPrivacy() {
 export function Connectors() {
   const [items, setItems] = useState(null);
   const [ai, setAi] = useState(null);
+  const [nodes, setNodes] = useState(null);
   const [err, setErr] = useState(null);
+  const [filter, setFilter] = useState('all');
 
   async function refresh() {
-    try { setItems(await api.connectors()); setAi(await api.aiMode()); }
+    try {
+      setItems(await api.connectors());
+      setAi(await api.aiMode());
+      setNodes(await api.nodeCatalog().catch(() => null));
+    }
     catch (e) { setErr(e.message); }
   }
   useState(() => { refresh(); });
+
+  const all = (items && items.connectors) || [];
+  const shown = filter === 'all' ? all
+    : filter === 'usable' ? all.filter(c => c.status === 'supported')
+    : all.filter(c => c.status !== 'supported');
 
   return (
     <div className="screen">
@@ -212,18 +223,47 @@ export function Connectors() {
           <h1>Connectors</h1>
           <p className="muted">What each connector can and cannot see — measured live, not promised.</p>
         </div>
+        <div className="tier-buttons">
+          {[['all', 'All'], ['usable', 'Usable'], ['restricted', 'Restricted / planned']].map(([f, label]) => (
+            <button key={f} className={`chip ${filter === f ? 'on' : ''}`} onClick={() => setFilter(f)}>{label}</button>
+          ))}
+        </div>
       </header>
       {err && <div className="error">{err}</div>}
-      <div className="grid2">
-        {((items && items.connectors) || []).map(c => (
-          <Card key={c.id} title={c.name}
-                actions={<span className={`conn-status ${c.status}`}>{c.status}</span>}>
-            <Row><div><strong>Can see:</strong> {c.can_see}</div></Row>
-            <Row><div><strong>Cannot see:</strong> {c.cannot_see}</div></Row>
-            {c.detail && <Row><div className="muted small">{c.detail}</div></Row>}
-          </Card>
+      <div className="conn-grid">
+        {shown.map(c => (
+          <div key={c.id} className={`card conn-card conn-${c.status}`}>
+            <div className="card-header">
+              <strong>{c.name}</strong>
+              <span className={`conn-status ${c.status}`}>{c.status}</span>
+            </div>
+            <div className="conn-lines">
+              <div className="conn-line"><span className="conn-k ok">can</span><span>{c.can_see}</span></div>
+              <div className="conn-line"><span className="conn-k bad">can't</span><span>{c.cannot_see}</span></div>
+              {c.detail && <div className="conn-line muted small"><span className="conn-k dim">note</span><span>{c.detail}</span></div>}
+            </div>
+          </div>
         ))}
+        {items && shown.length === 0 && <div className="card empty-state"><p>No connectors in this view.</p></div>}
       </div>
+
+      {nodes && (
+        <Card title={`Node catalog — ${nodes.nodes.length} validated node types`}>
+          <p className="muted small" style={{ marginBottom: 10 }}>
+            The same catalog the worker's graph validator enforces at bind time — the UI can never advertise a node the executor would refuse.
+          </p>
+          <div className="node-catalog">
+            {nodes.nodes.map(n => (
+              <div key={n.type} className="node-chip" title={n.permission ? `permission: ${n.permission}` : 'no special permission'}>
+                <span className="node-type mono">{n.type}</span>
+                <span className="node-group">{n.group}</span>
+                {n.permission && <span className="node-perm" aria-label={`requires ${n.permission}`}>🔒</span>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {ai && (
         <Card title="Model status">
           <Row>
