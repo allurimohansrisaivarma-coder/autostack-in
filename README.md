@@ -4,7 +4,7 @@
 > Local-first business automation platform for Indian SMEs — describe an office workflow in plain English, get AI-drafted automation, test it safely in a sandbox, approve it, and let it run on a schedule, file-change, or webhook — with a tamper-evident audit trail and role-based access control throughout.
 
 ---
-DEMO VIDEO LINK - [[https://drive.google.com/file/d/11lU6d4mTxDCkl8erF6AZy_DYP-136ZwN/view?usp=drivesdk](url)](https://drive.google.com/file/d/11lU6d4mTxDCkl8erF6AZy_DYP-136ZwN/view?usp=drivesdk)
+DEMO VIDEO LINK - (https://drive.google.com/file/d/11lU6d4mTxDCkl8erF6AZy_DYP-136ZwN/view?usp=drivesdk)
 ## Problem Statement
 
 **Repetitive office work kills productivity in Indian SMEs.**
