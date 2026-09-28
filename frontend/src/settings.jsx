@@ -81,7 +81,7 @@ function GovernanceStatus() {
 }
 
 // ── Profile: identity + API tokens (moved from the old Profile screen) ────────
-function ProfileSection({ identity }) {
+function ProfileSection({ identity, setIdentity }) {
   const [tokens, setTokens] = useState(null);
   const [newToken, setNewToken] = useState(null);
   const user = identity && identity.user;
@@ -102,13 +102,34 @@ function ProfileSection({ identity }) {
     try { await api.authRevokeToken(id); refresh(); } catch (e) { window.alert(e.message); }
   }
 
+  async function switchRole(newRole) {
+    try {
+      await api.teamSelfRole(newRole);
+      const me = await api.authMe();
+      if (setIdentity) setIdentity(me);
+    } catch (err) { window.alert(err.message); }
+  }
+
   return (
     <div className="settings-body">
       <SectionHead title="Profile" sub="Your identity and API tokens on this machine." />
       <Card title="Account">
         <Row><div>Username</div><div>{user ? user.username : 'service token (no local user)'}</div></Row>
         <Row><div>Display name</div><div>{user && user.display_name ? user.display_name : '—'}</div></Row>
-        <Row><div>Role</div><div>{identity ? identity.role : '—'}</div></Row>
+        <Row>
+          <div>Role</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span><b>{identity ? identity.role : '—'}</b></span>
+            <select
+              value={identity ? identity.role : 'operator'}
+              aria-label="Change account role"
+              onChange={e => switchRole(e.target.value)}
+              style={{ padding: '3px 8px', borderRadius: 6, fontSize: 13, background: 'var(--card-bg, #1e1e1e)', color: 'inherit', border: '1px solid var(--border, #444)' }}
+            >
+              {['observer', 'operator', 'approver', 'owner'].map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+        </Row>
         <Row><div>Organization</div><div>{identity && identity.org_name ? identity.org_name : '—'}</div></Row>
       </Card>
       <Card title="API tokens" actions={<button className="link" onClick={issue}>Issue new token</button>}>
@@ -313,7 +334,7 @@ function SSOStatus() {
   return <Row><div>{status ? (status.enabled ? `Enabled — ${status.provider}` : 'Not enabled on this tier') : '…'}</div></Row>;
 }
 
-export function Settings({ identity, onExit, setPage }) {
+export function Settings({ identity, onExit, setPage, setIdentity }) {
   // Section state lives in the hash (#/settings/security) so refresh and
   // back/forward keep the current section — same contract as the app router.
   const sectionForHash = () => {
@@ -347,7 +368,7 @@ export function Settings({ identity, onExit, setPage }) {
       <SettingsNav sections={visibleSections} active={active} onNavigate={setSection} />
       <Reveal key={active} className="settings-content" y={10} blur={false}>
         {active === 'general' && <GeneralSection />}
-        {active === 'profile' && <ProfileSection identity={identity} />}
+        {active === 'profile' && <ProfileSection identity={identity} setIdentity={setIdentity} />}
         {active === 'appearance' && <AppearanceSection />}
         {active === 'security' && <SecuritySection identity={identity} />}
         {active === 'organization' && <OrganizationSection identity={identity} setPage={setPage} />}

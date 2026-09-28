@@ -252,8 +252,8 @@ function App() {
   // of those buttons throws "setPage is not a function" on click.
   const screenMap = {
     landing: <AppHome setPage={setPage} />,
-    settings: <Settings identity={identity} onExit={() => setPage('dashboard')} setPage={setPage} />,
-    profile: <Profile identity={identity} />,
+    settings: <Settings identity={identity} setIdentity={setIdentity} onExit={() => setPage('dashboard')} setPage={setPage} />,
+    profile: <Profile identity={identity} setIdentity={setIdentity} />,
     teams: <Teams identity={identity} />,
     runners: <Runners identity={identity} />,
     scheduling: <Scheduling identity={identity} />,

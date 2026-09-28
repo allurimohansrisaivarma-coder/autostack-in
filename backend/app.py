@@ -53,11 +53,34 @@ with db_engine.begin() as _conn:
         _conn.execute(_sqltext(
             f"CREATE INDEX IF NOT EXISTS {_idx} ON {_tbl}({_col})"))
 
+_DEFAULT_CLIENTS_CSV = (
+    "ClientID,Name,Email,FollowUpDate,Status\n"
+    "C001,Sample Client One,client1@example.invalid,2026-09-20,Follow-up due\n"
+    "C002,Sample Client Two,client2@example.invalid,2026-09-21,New\n"
+    "C003,Sample Client Three,client3@example.invalid,2026-09-20,Follow-up due\n"
+)
+_DEFAULT_INVOICES_CSV = (
+    "InvoiceID,PONumber,Vendor,Amount,POStatus\n"
+    "INV-001,PO-100,Acme Supplies,12500.00,\n"
+    "INV-002,PO-101,Bharat Traders,8400.50,\n"
+    "INV-003,PO-999,Missing Goods Ltd,1500.00,\n"
+    "INV-004,PO-102,Acme Supplies,3200.00,\n"
+)
+_DEFAULT_POS_CSV = (
+    "PONumber,Vendor,Amount\n"
+    "PO-100,Acme Supplies,12500.00\n"
+    "PO-101,Bharat Traders,8300.00\n"
+    "PO-102,Acme Supplies,3199.99\n"
+)
+
 # Ensure sample tracking CSV and default built-in workflow exist
 _sample_target = cfg.DATA_DIR / "resources" / "sample-tracking-file" / "clients.csv"
-if not _sample_target.is_file() and (cfg.FIXTURES_DIR / "clients-before.csv").is_file():
+if not _sample_target.is_file():
     _sample_target.parent.mkdir(parents=True, exist_ok=True)
-    _sample_target.write_bytes((cfg.FIXTURES_DIR / "clients-before.csv").read_bytes())
+    if (cfg.FIXTURES_DIR / "clients-before.csv").is_file():
+        _sample_target.write_bytes((cfg.FIXTURES_DIR / "clients-before.csv").read_bytes())
+    else:
+        _sample_target.write_bytes(_DEFAULT_CLIENTS_CSV.encode())
 
 with Session(db_engine) as _init_db:
     if _init_db.get(Workflow, "wf_client_followup") is None:
@@ -128,9 +151,10 @@ _extra = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") i
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_default_origins + _extra,
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -185,12 +209,18 @@ def stage_resource(body: StageBody, db: Session = Depends(get_db)):
         cleared_ctx = db.query(_Setting).filter(_Setting.key.like("run_context:%")).delete()
         if cleared_ctx:
             audit_mod.append(db, "spike.reset", {"cleared": "run_context keys", "rows": cleared_ctx})
-        reset = (cfg.FIXTURES_DIR / "clients-before.csv").read_bytes()
+        if (cfg.FIXTURES_DIR / "clients-before.csv").is_file():
+            reset = (cfg.FIXTURES_DIR / "clients-before.csv").read_bytes()
+        else:
+            reset = _DEFAULT_CLIENTS_CSV.encode()
     else:
         path = (cfg.FIXTURES_DIR / body.fixture)
-        if not path.is_file() or path.suffix != ".csv" or "/" in body.fixture or ".." in body.fixture:
+        if body.fixture == "clients-before.csv" and not path.is_file():
+            reset = _DEFAULT_CLIENTS_CSV.encode()
+        elif not path.is_file() or path.suffix != ".csv" or "/" in body.fixture or ".." in body.fixture:
             raise HTTPException(status_code=400, detail={"error": "unknown fixture"})
-        reset = path.read_bytes()
+        else:
+            reset = path.read_bytes()
     try:
         result = write_resource("sample-tracking-file", body.as_filename, reset, backup=False)
     except PermissionError as exc:
@@ -1546,8 +1576,12 @@ def compare_run(db: Session = Depends(get_db)):
     from backend.engine import compare
     from backend.security import safeio
 
-    _seed_if_missing("invoice-register", "invoices.csv", cfg.FIXTURES_DIR.joinpath("invoices-before.csv").read_bytes())
-    _seed_if_missing("invoice-register", "purchase-orders.csv", cfg.FIXTURES_DIR.joinpath("purchase-orders.csv").read_bytes())
+    inv_path = cfg.FIXTURES_DIR / "invoices-before.csv"
+    inv_bytes = inv_path.read_bytes() if inv_path.is_file() else _DEFAULT_INVOICES_CSV.encode()
+    po_path = cfg.FIXTURES_DIR / "purchase-orders.csv"
+    po_bytes = po_path.read_bytes() if po_path.is_file() else _DEFAULT_POS_CSV.encode()
+    _seed_if_missing("invoice-register", "invoices.csv", inv_bytes)
+    _seed_if_missing("invoice-register", "purchase-orders.csv", po_bytes)
 
     invoices = compare.parse_table(safeio.read_resource("invoice-register", "invoices.csv"))
     purchase_orders = compare.parse_table(safeio.read_resource("invoice-register", "purchase-orders.csv"))

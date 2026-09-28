@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ── 2. Copy source ────────────────────────────────────────────────────────────
 COPY backend/ backend/
 COPY shared/  shared/
+COPY tests/fixtures/ tests/fixtures/
 
 # ── 3. Non-root runtime ───────────────────────────────────────────────────────
 RUN useradd --create-home appuser \

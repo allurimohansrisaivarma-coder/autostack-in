@@ -29,6 +29,9 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
       }
       const issued = await api.authIssueToken(username, password, 'dashboard');
       setToken(issued.token);
+      if (mode === 'signup') {
+        try { await api.teamSelfRole('owner'); } catch { /* solo promotion if allowed */ }
+      }
       const me = await api.authMe();
       setIdentity(me);
       setPage('landing');
@@ -70,6 +73,20 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
               ← Back
             </button>
           )}
+        </div>
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ width: '100%', fontSize: 12.5, padding: '7px 10px', textAlign: 'center' }}
+            onClick={() => {
+              setMode('login');
+              setUsername('demouser');
+              setPassword('demopassword123');
+            }}
+          >
+            🔑 Fill Demo Owner Credentials (demouser)
+          </button>
         </div>
       </form>
     </div>
@@ -145,7 +162,7 @@ function SSOStatus() {
 
 // ── Profile / API tokens ──────────────────────────────────────────────────────
 
-export function Profile({ identity }) {
+export function Profile({ identity, setIdentity }) {
   const [tokens, setTokens] = useState(null);
   const [newToken, setNewToken] = useState(null);
   const user = identity && identity.user;
@@ -163,6 +180,14 @@ export function Profile({ identity }) {
     } catch (err) { setNewToken(null); alert(err.message); }
   }
 
+  async function switchRole(newRole) {
+    try {
+      await api.teamSelfRole(newRole);
+      const me = await api.authMe();
+      if (setIdentity) setIdentity(me);
+    } catch (err) { alert(err.message); }
+  }
+
   return (
     <div className="screen">
       <header className="screen-head">
@@ -171,7 +196,20 @@ export function Profile({ identity }) {
       <Card title="Account">
         <Row><div>Username: {user ? user.username : 'service token (no local user)'}</div></Row>
         <Row><div>Display name: {user && user.display_name ? user.display_name : '—'}</div></Row>
-        <Row><div>Role: {identity ? identity.role : '—'}</div></Row>
+        <Row>
+          <div>Role: <b>{identity ? identity.role : '—'}</b></div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 13 }}>Switch role:</span>
+            <select
+              value={identity ? identity.role : 'operator'}
+              aria-label="Manage Role"
+              onChange={e => switchRole(e.target.value)}
+              style={{ padding: '4px 8px', borderRadius: 6, background: 'var(--card-bg, #1e1e1e)', color: 'inherit', border: '1px solid var(--border, #444)' }}
+            >
+              {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+        </Row>
       </Card>
       <Card title="API tokens" actions={<button className="link" onClick={issue}>Issue new token</button>}>
         {newToken && (

@@ -30,9 +30,20 @@ export function subscribeLive(fn) {
 }
 
 async function pollOnce() {
-  // Anonymous visitors never poll: the console 401-loop is noise for signed-out
-  // users, and the data would be refused anyway. Signed-in state re-arms it.
-  try { if (!localStorage.getItem('autostack_token')) { state.data = { ...state.data, connected: false }; emit(); return; } } catch { /* storage unavailable */ }
+  // Anonymous visitors probe health only: verifies backend connectivity without 401 noise.
+  // Signed-in visitors with a token poll the full dataset.
+  let tokenPresent = false;
+  try { tokenPresent = !!localStorage.getItem('autostack_token'); } catch { /* storage unavailable */ }
+  if (!tokenPresent) {
+    let ok = false;
+    try {
+      const h = await api.health();
+      ok = !!(h && h.status === 'ok');
+    } catch { ok = false; }
+    state.data = { ...state.data, connected: ok };
+    emit();
+    return;
+  }
   const next = { ...state.data };
   let connected = false;
   try {
