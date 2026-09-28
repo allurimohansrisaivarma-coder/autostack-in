@@ -67,6 +67,43 @@ def policy_hash(policy: dict) -> str:
         json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+# Sandbox outcome classes (sandbox-hardening upgrade):
+#   passed           — every functional check green; approve-at-create may proceed
+#   failed_policy    — the code violated policy (static refusal/timeout/unsafe) —
+#                      a REAL problem with the artifact; never retried blindly
+#   failed_assertion — the code ran but produced wrong output vs the plan-derived
+#                      expected results; one AI repair loop is allowed, then human
+#   failed_infra     — transient environment trouble (interpreter hiccup, I/O) —
+#                      retryable via one-click re-run without blaming the code
+RESULT_CLASSES = ("passed", "failed_policy", "failed_assertion", "failed_infra")
+
+
+def classify_report(report: dict) -> str:
+    """Classify a sandbox report into a stable result class.
+
+    Deterministic from the report content alone (the report is content-bound by
+    its own sha256), so the UI and the autopilot can branch on it safely.
+    """
+    status = report.get("status")
+    error = (report.get("error") or "")
+    if status == "passed":
+        return "passed"
+    if status == "refused":
+        return "failed_policy"
+    if error:
+        # Timeouts and interpreter crashes are policy/infra splits: a wall-clock
+        # kill while the code looped forever is the CODE's fault (policy); a
+        # resource/socket failure without a result marker is infra.
+        if "timeout" in error.lower():
+            return "failed_policy"
+        if "no result marker" in error.lower() or "unparseable result" in error.lower():
+            return "failed_infra"
+        # A nonzero exit from the generated code itself is a code/policy fault.
+        return "failed_policy"
+    # Ran fine but checks disagree with plan-derived expectations.
+    return "failed_assertion"
+
+
 def run_isolated_test(code: str, rows: list[dict], ctx: dict | None = None,
                       policy: dict | None = None, timeout_s: int = 15,
                       expected: list[dict] | None = None,
@@ -74,13 +111,16 @@ def run_isolated_test(code: str, rows: list[dict], ctx: dict | None = None,
     """Execute generated code in the sandbox. Returns a content-bound report.
 
     Never raises for test failures — a failed test is a valid outcome ('failed').
-    Raises only for misuse (unsafe code, missing entrypoint).
+    Raises only for misuse (unsafe code, missing entrypoint). The report carries
+    `result_class` (see RESULT_CLASSES) for the UI and the autopilot loop.
     """
     policy = policy or {"max_output_items": 1000, "forbidden": ["network", "filesystem", "subprocess"]}
     violations = static_check(code)
     if violations:
-        return {"status": "refused", "violations": violations,
-                "reason": "static security validation failed"}
+        rep = {"status": "refused", "violations": violations,
+               "reason": "static security validation failed"}
+        rep["result_class"] = classify_report(rep)
+        return rep
     ctx = ctx or {}
     spec = {"rows": rows, "ctx": ctx, "code": code}
     with tempfile.TemporaryDirectory() as td:
@@ -105,20 +145,28 @@ def run_isolated_test(code: str, rows: list[dict], ctx: dict | None = None,
                 preexec_fn=(limits and _limits) or None,
             )
         except subprocess.TimeoutExpired:
-            return _report("failed", "sandbox timeout", policy, limits, [])
+            rep = _report("failed", "sandbox timeout", policy, limits, [])
+            rep["result_class"] = classify_report(rep)
+            return rep
         stdout = proc.stdout or ""
         marker = "__RESULT__"
         idx = stdout.rfind(marker)
         if proc.returncode != 0 or idx < 0:
-            return _report("failed", (proc.stderr or "no result marker")[-400:],
-                           policy, limits, [])
+            rep = _report("failed", (proc.stderr or "no result marker")[-400:],
+                          policy, limits, [])
+            rep["result_class"] = classify_report(rep)
+            return rep
         try:
             result = json.loads(stdout[idx + len(marker):])
         except json.JSONDecodeError:
-            return _report("failed", "unparseable result", policy, limits, [])
+            rep = _report("failed", "unparseable result", policy, limits, [])
+            rep["result_class"] = classify_report(rep)
+            return rep
         checks = _functional_checks(result, policy, expected=expected, key_field=key_field)
         status = "passed" if all(c["ok"] for c in checks) else "failed"
-        return _report(status, None, policy, limits, checks, result=result)
+        rep = _report(status, None, policy, limits, checks, result=result)
+        rep["result_class"] = classify_report(rep)
+        return rep
 
 
 def _functional_checks(result, policy, expected=None, key_field="id") -> list[dict]:

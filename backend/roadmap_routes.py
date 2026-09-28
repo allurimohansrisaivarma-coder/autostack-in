@@ -714,6 +714,251 @@ def org_convert_to_team(body: ConvertBody, principal: _Principal = Depends(requi
             "note": f"converted from {before} to team; you remain the owner — invite members next"}
 
 
+# # ── Tool Registry API (native nodes + MCP at scale) ──────────────────────────
+
+class McpServerBody(BaseModel):
+    server: str
+    description: str = ""
+    tools: list[dict] = []
+
+
+class ToolAllowlistBody(BaseModel):
+    org_allow: list[str] | None = None
+
+
+@router.get("/tools", dependencies=[Depends(require_principal)])
+def tools_list(search: str = "", category: str = "", source: str = "",
+               status: str = "", limit: int = 50, offset: int = 0,
+               db: Session = Depends(get_db)):
+    """Browse the tool registry: search + filters + pagination so thousands of
+    MCP tools stay usable. Statuses are honest (experimental MCP tools cannot
+    be used until a probe promotes them)."""
+    from backend.engine.tool_registry import REGISTRY
+    return REGISTRY.list(search=search, category=category, source=source,
+                         status=status, limit=limit, offset=offset)
+
+
+@router.get("/tools/categories", dependencies=[Depends(require_principal)])
+def tools_categories():
+    from backend.engine.tool_registry import RISK_FOR_CATEGORY, SANDBOX_POLICY_FOR_CATEGORY
+    return {"categories": sorted(set(RISK_FOR_CATEGORY) | {"mcp"}),
+            "risk_ladder": RISK_FOR_CATEGORY,
+            "sandbox_policies": SANDBOX_POLICY_FOR_CATEGORY}
+
+
+@router.post("/tools/mcp-servers", dependencies=[Depends(admin_guard)])
+def tools_register_mcp(body: McpServerBody, db: Session = Depends(get_db)):
+    """Register an MCP server's tools (owner/admin). Lazy + honest: tools land
+    as experimental; a future live probe promotes them. Audited."""
+    from backend.engine.tool_registry import REGISTRY
+    if not body.server.strip():
+        raise HTTPException(status_code=422, detail={"error": "server name required"})
+    out = REGISTRY.register_mcp_server(body.server.strip(), body.tools, body.description)
+    audit_mod.append(db, "tools.mcp_registered", {"server": out["server"],
+                                                  "tools": out["tools_registered"]})
+    db.commit()
+    return out
+
+
+@router.post("/tools/allowlist", dependencies=[Depends(admin_guard)])
+def tools_set_org_allowlist(body: ToolAllowlistBody, db: Session = Depends(get_db)):
+    """Per-org tool allowlist (owner/admin). None clears the restriction;
+    an explicit list is intersected with the registry at use time. Audited."""
+    row = db.get(Setting, "tools:org_allowlist")
+    payload = json.dumps({"org_allow": body.org_allow})
+    if row is None:
+        db.add(Setting(key="tools:org_allowlist", value_json=payload))
+    else:
+        row.value_json = payload
+    audit_mod.append(db, "tools.org_allowlist_set",
+                     {"count": (len(body.org_allow) if body.org_allow is not None else None)})
+    db.commit()
+    return {"org_allow": body.org_allow,
+            "note": "null = unrestricted (native supported tools); a list = only those tools"}
+
+
+def _org_tool_allowlist(db: Session):
+    row = db.get(Setting, "tools:org_allowlist")
+    if row is None:
+        return None
+    try:
+        return json.loads(row.value_json).get("org_allow")
+    except Exception:
+        return None
+
+
+def _retrieve_tools_for_goal(db: Session, goal: str, k: int = 12) -> list[dict]:
+    """Scale-safe AI retrieval: top-k registry tools for a goal, intersected
+    with the org allowlist. The model NEVER sees the whole catalog."""
+    from backend.engine.tool_registry import REGISTRY
+    allow = REGISTRY.allowlist_for(_org_tool_allowlist(db), None)
+    return REGISTRY.retrieve(goal, allowlist=allow, k=k)
+
+
+# ── AI full-workflow autopilot ────────────────────────────────────────────────
+
+class AutopilotBody(BaseModel):
+    goal: str
+    org_type: str = "corporate"
+    size: str = "medium"
+    department: str = "finance"
+    process_type: str = "accounts_payable"
+    connectors: list[str] = []
+    tools: list[str] = []
+    trigger: str = "manual"
+    sensitivity_note: str = ""
+    outcome: str = ""
+    status_val: str = "Follow-up due"
+    date_val: str = "2026-09-20"
+    action: str = "create_draft"
+    notify: bool = True
+
+
+@router.post("/ai/autopilot", dependencies=[Depends(require_writer)])
+def ai_autopilot(body: AutopilotBody, request: Request, db: Session = Depends(get_db)):
+    """AI full-workflow creation (autopilot): goal → retrieved tools → plan →
+    generate → sandbox. NEVER activates: the human decides via approve-at-
+    create afterwards. Operators' results become change requests client-side
+    (the response carries everything needed to open one). One repair loop on
+    failed_assertion; failed_infra is retried once transparently. The mock
+    provider stays the local-first default — no cloud dependency.
+
+    Audited: goal, provider, retrieved tools, plan sha, artifact sha, sandbox
+    result class."""
+    import os as _os
+    from backend.engine.tool_registry import REGISTRY
+    from backend.models import GeneratedArtifact, GenerationPlan, TestJob
+    from backend.engine.generation import plan_sha256 as _plan_sha
+    from backend.identity import now_iso
+    from backend import spike_config as cfg
+    from backend.app import _as_tmp_fixture, _expected_outputs, sha256_bytes
+    from backend.engine import generation as gen
+    from backend.engine import runner
+    from backend.file_diff import read_snapshot as _rs
+    if not body.goal.strip():
+        raise HTTPException(status_code=422, detail={"error": "goal required"})
+    principal = require_principal(request, db)
+    # 1) retrieve allowlisted tools for the goal (top-k, never the full catalog)
+    tools = _retrieve_tools_for_goal(db, body.goal)
+    tool_ids = [t["id"] for t in tools]
+    # 2) build the plan from the goal + confirmed context (mock/offline path:
+    #    deterministic mapping; a real provider drafts the same structure)
+    destinations = ["in_app"] + (["desktop_notification"] if body.notify else [])
+    plan = {"client_id_field": "ClientID",
+            "field_mappings": {"Name": "Name", "FollowUpDate": "FollowUpDate"},
+            "eligibility": {"status": body.status_val, "status_field": "Status",
+                            "date_field": "FollowUpDate", "date_value": body.date_val},
+            "action": body.action if body.action in ("create_draft", "update_status") else "create_draft",
+            "destinations": destinations}
+    from backend.engine.generation import validate_plan as _vplan
+    missing = _vplan(plan)
+    if missing:
+        raise HTTPException(status_code=422, detail={"error": "plan incomplete from goal",
+                                                     "missing": missing})
+    provider = _os.environ.get("AUTOSTACK_AI_PROVIDER", "mock")
+    audit_mod.append(db, "ai.autopilot_started", {
+        "goal": body.goal[:300], "provider": provider,
+        "retrieved_tools": tool_ids, "org_type": body.org_type,
+        "department": body.department})
+    db.commit()
+    # 3) create the plan row via the same code path as the manual flow
+    prow = GenerationPlan(id=str(uuid.uuid4()), candidate_id=None,
+                          plan_json=json.dumps(plan, sort_keys=True),
+                          plan_sha256=_plan_sha(plan),
+                          missing_rules_json=json.dumps([]),
+                          status="approved_for_generation", created_at=datetime.now(timezone.utc))
+    db.add(prow)
+    db.commit()
+    # 4) generate + static validation
+    outcome = gen.generate(plan)
+    if outcome["violations"]:
+        raise HTTPException(status_code=422, detail={"error": "static validation failed",
+                                                     "violations": outcome["violations"]})
+    art = GeneratedArtifact(id=str(uuid.uuid4()), plan_id=prow.id, version=1,
+                            model_output_json=json.dumps({"output": outcome["model_output"][:4000]}),
+                            code=outcome["code"], code_sha256=outcome["code_sha256"],
+                            static_check_json=json.dumps(outcome["violations"]),
+                            status="awaiting_test_approval", created_at=now_iso())
+    db.add(art)
+    db.commit()
+    # 5) sandbox with classification + retries
+    policy = {"max_output_items": 1000, "forbidden": ["network", "filesystem", "subprocess"]}
+    fixture_payload = (cfg.FIXTURES_DIR / "clients-before.csv").read_bytes()
+    table = list(_rs(_as_tmp_fixture(fixture_payload)).values())
+    ctx = gen.plan_run_context(plan)
+    id_field = plan["client_id_field"]
+    expected = _expected_outputs(table[:50], plan, id_field)
+
+    def _run_once():
+        job = TestJob(id=str(uuid.uuid4()), artifact_id=art.id, code_sha256=art.code_sha256,
+                      input_sha256=sha256_bytes(fixture_payload), fixture_name="clients-before.csv",
+                      policy_json=json.dumps(policy), status="running", created_at=now_iso())
+        db.add(job)
+        db.commit()
+        rep = runner.run_isolated_test(art.code, table[:50], ctx=ctx, policy=policy,
+                                       expected=expected, key_field=id_field)
+        job.status = rep["status"]
+        job.report_json = json.dumps(rep)
+        job.report_sha256 = rep["report_sha256"]
+        if rep["status"] == "passed":
+            art.status = "test_passed"
+        db.commit()
+        return job, rep
+
+    job, report = _run_once()
+    result_class = report.get("result_class") or runner.classify_report(report)
+    attempts = 1
+    repaired = False
+    if result_class == "failed_infra":
+        job, report = _run_once()   # infra: transparent retry, not "bad code"
+        result_class = report.get("result_class") or runner.classify_report(report)
+        attempts = 2
+    if result_class == "failed_assertion" and attempts == 1:
+        # ONE repair loop: revise plan (narrow to drafts), regenerate, retest.
+        plan2 = dict(plan)
+        plan2["action"] = "create_draft"
+        prow2 = GenerationPlan(id=str(uuid.uuid4()), candidate_id=None,
+                               plan_json=json.dumps(plan2, sort_keys=True),
+                               plan_sha256=_plan_sha(plan2),
+                               missing_rules_json=json.dumps([]),
+                               status="approved_for_generation", created_at=datetime.now(timezone.utc))
+        db.add(prow2)
+        db.commit()
+        outcome2 = gen.generate(plan2)
+        art2 = GeneratedArtifact(id=str(uuid.uuid4()), plan_id=prow2.id, version=1,
+                                 model_output_json=json.dumps({"output": outcome2["model_output"][:4000]}),
+                                 code=outcome2["code"], code_sha256=outcome2["code_sha256"],
+                                 static_check_json=json.dumps(outcome2["violations"]),
+                                 status="awaiting_test_approval", created_at=now_iso())
+        if not outcome2["violations"]:
+            db.add(art2)
+            db.commit()
+            art, prow = art2, prow2
+            repaired = True
+            job, report = _run_once()
+            result_class = report.get("result_class") or runner.classify_report(report)
+            attempts += 1
+    audit_mod.append(db, "ai.autopilot_finished", {
+        "plan_sha256": prow.plan_sha256[:16], "artifact_id": art.id,
+        "artifact_sha256": art.code_sha256[:16], "result_class": result_class,
+        "attempts": attempts, "repaired": repaired, "provider": provider,
+        "retrieved_tools": tool_ids})
+    db.commit()
+    context = {"org_type": body.org_type, "size": body.size, "department": body.department,
+               "process_type": body.process_type, "connectors": body.connectors,
+               "tools": body.tools, "trigger": body.trigger,
+               "sensitivity_note": body.sensitivity_note, "outcome": body.outcome}
+    return {"plan_id": prow.id, "plan": plan, "artifact_id": art.id,
+            "code_sha256": art.code_sha256, "job_id": job.id,
+            "sandbox": {"status": report["status"], "result_class": result_class,
+                        "attempts": attempts, "repaired": repaired,
+                        "checks": report.get("checks", [])},
+            "retrieved_tools": tool_ids, "context": context,
+            "note": ("sandbox passed — approve activation now to bind, or open a change request"
+                     if result_class == "passed" else
+                     "sandbox did not pass; nothing is activated and no bind is possible")}
+
+
 # ── GitHub-PR-style change requests (role redesign) ──────────────────────────
 
 class ChangeRequestBody(BaseModel):

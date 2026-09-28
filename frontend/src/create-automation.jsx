@@ -7,6 +7,9 @@ import { subscribeLive, capturePoll } from './live.js';
 import { Icon, ICONS, Terminal, stamp } from './main-shared.jsx';
 
 export function CreateAutomation({ setPage }) {
+  // Entry mode: 'step' = existing guided flow; 'ai' = autopilot (goal → plan →
+  // sandbox → approve-at-create). Both preserve the 5-step visual flow.
+  const [mode, setMode] = useState(null); // null = chooser not answered
   const [step, setStep] = useState(1);
   const [live, setLive] = useState(null);
   useEffect(() => subscribeLive(setLive), []);
@@ -185,11 +188,82 @@ export function CreateAutomation({ setPage }) {
       title: ctxOther.trim() ? ctxOther.trim() : `Client follow-up (${ctx.department})`,
       summary: ctx.outcome || 'submitted from the Create Automation flow',
       target_workflow_id: null,
-      payload: { plan_id: planId, ...ctx },
+      payload: { plan_id: planId, artifact_id: artifact && artifact.artifact_id,
+                 job_id: job && job.job_id, ...ctx },
     });
     setBound({ change_request: res.id, status: res.status });
     return res;
   }, r => `change request ${r.id} opened — an owner/admin will review it`);
+
+  // ── AI autopilot (full workflow) ──────────────────────────────────────────
+  const [aiGoal, setAiGoal] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState(null);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiApproved, setAiApproved] = useState(null);
+  const [aiBound, setAiBound] = useState(null);
+  const [aiCR, setAiCR] = useState(null);
+  const [toolsBrowser, setToolsBrowser] = useState(null);
+  const [toolsSearch, setToolsSearch] = useState('');
+
+  const runAutopilot = () => gateAI(async () => {
+    const res = await api.aiAutopilot({
+      goal: aiGoal.trim() || 'draft client follow-ups for overdue accounts',
+      org_type: ctxOrgType, size: ctxSize, department: ctxDept,
+      process_type: ctxOther.trim() ? ctxOther.trim().toLowerCase().replace(/\s+/g, '_') : ctxProcess,
+      connectors: ctxConnectors, tools: ctxTools, trigger: ctxTrigger,
+      sensitivity_note: ctxSensitivity.trim(), outcome: ctxOutcome.trim(),
+      status_val: statusVal, date_val: dateVal, action: actionSel, notify: notifySel,
+    });
+    setAiResult(res);
+    return res;
+  }, r => `autopilot finished — sandbox ${r.sandbox.result_class}${r.sandbox.repaired ? ' (after repair)' : ''}`);
+
+  const gateAI = async (fn, okMsg) => {
+    setAiBusy(true); setAiErr(null);
+    try {
+      const out = await fn();
+      if (okMsg) pushLine('ok', typeof okMsg === 'function' ? okMsg(out) : okMsg);
+      return out;
+    } catch (e) {
+      setAiErr(e.message);
+      pushLine('fail', `autopilot refused: ${e.message}`);
+      return null;
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  // Approve-at-create on the autopilot result: same activation endpoint as
+  // the Verify step, then bind in-session. Owner/admin only (backend enforced).
+  const approveAutopilotNow = () => gateAI(async () => {
+    if (!aiResult || aiResult.sandbox.result_class !== 'passed') throw new Error('sandbox must be passed before approval');
+    const a = await api.approveActivation(aiResult.artifact_id, aiResult.job_id);
+    setAiApproved(a);
+    const b = await api.createWorkflowFromPlan(aiResult.plan_id, aiResult.context);
+    setAiBound(b);
+    return b;
+  }, b => `activated + bound: workflow ${b.workflow_id} v${b.version}`);
+
+  // Operator path for the autopilot result: a change request carrying the
+  // sandbox-passed evidence (nothing is activated or bound by the operator).
+  const autopilotToCR = () => gateAI(async () => {
+    const res = await api.openChangeRequest({
+      kind: 'workflow_create',
+      title: `Autopilot: ${aiGoal.trim().slice(0, 80) || 'client follow-ups'}`,
+      summary: aiResult ? aiResult.note : 'autopilot result',
+      target_workflow_id: null,
+      payload: aiResult ? { plan_id: aiResult.plan_id, artifact_id: aiResult.artifact_id,
+                            job_id: aiResult.job_id, ...aiResult.context } : {},
+    });
+    setAiCR(res);
+    return res;
+  }, r => `change request ${r.id} opened with the autopilot evidence`);
+
+  const loadTools = async (search) => {
+    try { setToolsBrowser(await api.tools({ search: search ?? toolsSearch, limit: 60 })); }
+    catch (e) { setAiErr(e.message); }
+  };
 
   const publish = () => gate(async () => {
     if (!bound) throw new Error('bind the workflow first');
@@ -230,6 +304,110 @@ export function CreateAutomation({ setPage }) {
         <span className={`badge ${connected ? 'green' : 'orange'}`}>{connected ? 'Worker: LIVE' : 'Worker offline — gates locked'}</span>
       </div>
 
+      {mode === null && (
+        <div className="card create-flow-card">
+          <h3>How do you want to build this?</h3>
+          <p className="muted">Both paths end at the same gates: sandbox first, human approval before anything goes live.</p>
+          <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
+            <button className="btn-primary" onClick={() => { setMode('ai'); setStep(1); }}>
+              <Icon d={ICONS.zap} size={16} /> Build with AI (full workflow)
+            </button>
+            <button className="btn-outline" onClick={() => { setMode('step'); }}>
+              Build step by step
+            </button>
+          </div>
+          <p className="muted small">{role ? `Your role: ${role}.` : 'Checking your role…'} {role && !['owner', 'admin'].includes(role) && 'Your result will be submitted as a change request for an owner/admin to review.'}</p>
+        </div>
+      )}
+
+      {mode === 'ai' && (
+        <div className="card create-flow-card">
+          <div className="step-head-row">
+            <div>
+              <h3>AI autopilot — full workflow</h3>
+              <p>Describe the goal. The worker retrieves allowlisted tools from the registry (top-k, never the whole catalog), proposes the plan, generates, and runs the sandbox. <b>Nothing activates</b> until you approve below.</p>
+            </div>
+            <button className="btn-outline" onClick={() => { setMode('step'); }}>Switch to step-by-step</button>
+          </div>
+          <div className="form-grid">
+            <label>Goal (natural language)
+              <input placeholder="e.g. draft follow-up reminders for clients with overdue reviews and update the tracker"
+                     value={aiGoal} onChange={e => setAiGoal(e.target.value)} />
+            </label>
+          </div>
+          <div className="ctx-summary" style={{ marginTop: 10 }}>
+            <div className="detail-label">Context hints (from step 1 — adjust there)</div>
+            <div className="tag-row">
+              <span className="tag">{ctxLabel('org_type', ctxOrgType)}</span>
+              <span className="tag">{ctxLabel('department', ctxDept)}</span>
+              {ctxConnectors.length > 0 && <span className="tag">connectors: {ctxConnectors.join(', ')}</span>}
+              {ctxTrigger && <span className="tag">trigger: {ctxTrigger}</span>}
+            </div>
+          </div>
+          <div className="publish-actions">
+            <button className="btn-primary" disabled={aiBusy || !connected} onClick={runAutopilot}>
+              <Icon d={ICONS.zap} size={16} /> {aiBusy ? 'Building…' : 'Build my workflow'}
+            </button>
+            <button className="btn-outline" disabled={aiBusy} onClick={() => loadTools()}>Browse tool registry</button>
+          </div>
+          {toolsBrowser && (
+            <div className="detail-section" style={{ marginTop: 12 }}>
+              <div className="detail-label">Tool registry ({toolsBrowser.total} tools — search, filters, pagination)</div>
+              <div className="field"><input placeholder="search tools…" value={toolsSearch}
+                     onChange={e => { setToolsSearch(e.target.value); loadTools(e.target.value); }} /></div>
+              <div className="node-catalog">
+                {toolsBrowser.tools.map(t => (
+                  <span key={t.id} className="node-chip" title={`${t.category} · risk: ${t.risk} · ${JSON.stringify(t.sandbox_policy)}`}>
+                    <span className="node-type mono">{t.id}</span>
+                    <span className="muted small"> {t.status}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {aiErr && <p className="helper-error">{aiErr}</p>}
+          {aiResult && (
+            <div className="detail-section" style={{ marginTop: 12 }}>
+              <div className="detail-label">Autopilot result</div>
+              <div className="tag-row">
+                <span className="tag">plan {aiResult.plan_id.slice(0, 8)}…</span>
+                <span className="tag">sandbox: {aiResult.sandbox.result_class}{aiResult.sandbox.repaired ? ' (repaired)' : ''}</span>
+                {aiResult.retrieved_tools.slice(0, 4).map(t => <span key={t} className="tag mono">{t.replace('native:', '')}</span>)}
+              </div>
+              <p className="muted small">{aiResult.note}</p>
+              {aiResult.sandbox.result_class === 'passed' && isReviewer && (
+                <div className="publish-actions">
+                  <button className="btn-primary" disabled={aiBusy || !!aiBound} onClick={approveAutopilotNow}>
+                    <Icon d={ICONS.check} size={16} /> Approve activation now
+                  </button>
+                  {!aiBound && <span className="muted small">activates this artifact under the confirmed plan, then binds — in one consent</span>}
+                </div>
+              )}
+              {aiResult.sandbox.result_class === 'passed' && !isReviewer && (
+                <div className="publish-actions">
+                  <button className="btn-outline" disabled={aiBusy || !!aiCR} onClick={autopilotToCR}>Submit as change request</button>
+                  <span className="muted small">owner/admin review required — you cannot activate directly</span>
+                </div>
+              )}
+              {aiResult.sandbox.result_class === 'failed_infra' && (
+                <p className="muted small">Infra failure — use “Build my workflow” to retry; the code is not blamed.</p>
+              )}
+              {aiResult.sandbox.result_class === 'failed_assertion' && (
+                <p className="muted small">One repair loop was attempted; the result above is final — adjust the plan and retry.</p>
+              )}
+              {aiBound && (
+                <div className="publish-actions">
+                  <span className="badge green">Bound: {aiBound.workflow_id} v{aiBound.version}</span>
+                  <button className="btn-dark" onClick={() => setPage('workflows')}>Go to Workflows</button>
+                </div>
+              )}
+              {aiCR && <span className="badge orange">Change request {aiCR.id.slice(0, 8)}… opened</span>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode !== 'ai' && (
       <div className="card create-flow-card">
         <div className="stepper-row">
           {['Context', 'Capture', 'Plan', 'Verify', 'Bind & Publish'].map((title, index) => {
@@ -559,6 +737,7 @@ export function CreateAutomation({ setPage }) {
           {step < 5 && <button className="btn-primary" onClick={() => setStep(prev => Math.min(5, prev + 1))}>Next <Icon d={ICONS.arrow} size={16} /></button>}
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -839,7 +839,7 @@ class TestJobBody(BaseModel):
 
 
 @app.post("/api/test-jobs", dependencies=[Depends(require_tester)])
-def create_test_job(body: TestJobBody, db: Session = Depends(get_db)):
+def create_test_job(body: TestJobBody, request: Request = None, db: Session = Depends(get_db)):
     from backend.engine import runner
     from backend.models import GeneratedArtifact, TestJob
     if not body.consent:
@@ -895,9 +895,72 @@ def create_test_job(body: TestJobBody, db: Session = Depends(get_db)):
     db.commit()
     audit_mod.append(db, "test.completed", {"job_id": job.id, "artifact_id": art.id,
                                             "status": job.status,
+                                            "result_class": report.get("result_class"),
                                             "policy_sha256": report["policy_sha256"]})
     db.commit()
-    return {"job_id": job.id, "status": job.status, "report": report}
+    return {"job_id": job.id, "status": job.status, "result_class": report.get("result_class"),
+            "report": report}
+
+
+class RerunBody(BaseModel):
+    consent: bool
+
+
+@app.post("/api/test-jobs/{job_id}/rerun", dependencies=[Depends(require_tester)])
+def rerun_test_job(job_id: str, body: RerunBody, db: Session = Depends(get_db)):
+    """One-click re-run for a failed sandbox job (primarily failed_infra).
+    Reuses the SAME artifact + fixture + policy so the outcome is comparable;
+    consent is re-required (the same human gate as the first run). Returns the
+    new job; the old one is never rewritten (append-only evidence)."""
+    from backend.engine import runner
+    from backend.models import GeneratedArtifact, GenerationPlan, TestJob
+    if not body.consent:
+        raise HTTPException(status_code=403, detail={"error": "test consent required"})
+    old = db.get(TestJob, job_id)
+    if old is None:
+        raise HTTPException(status_code=404, detail={"error": "test job not found"})
+    art = db.get(GeneratedArtifact, old.artifact_id)
+    if art is None:
+        raise HTTPException(status_code=404, detail={"error": "artifact not found"})
+    if art.status == "activated":
+        raise HTTPException(status_code=409, detail={"error": "artifact already activated; re-testing is refused"})
+    fixture_payload = (cfg.FIXTURES_DIR / old.fixture_name).read_bytes() \
+        if old.fixture_name == "reset" else (cfg.FIXTURES_DIR / old.fixture_name).read_bytes()
+    from backend.file_diff import read_snapshot as _rs
+    table = list(_rs(_as_tmp_fixture(fixture_payload)).values())
+    from backend.engine import generation
+    plan_row = db.get(GenerationPlan, art.plan_id)
+    plan = json.loads(plan_row.plan_json) if plan_row else {}
+    ctx = generation.plan_run_context(plan)
+    id_field = plan.get("client_id_field", "ClientID")
+    expected = _expected_outputs(table[:50], plan, id_field)
+    job = TestJob(id=str(uuid.uuid4()), artifact_id=art.id, code_sha256=art.code_sha256,
+                  input_sha256=sha256_bytes(fixture_payload), fixture_name=old.fixture_name,
+                  policy_json=old.policy_json, status="running", created_at=now_iso())
+    db.add(job)
+    db.commit()
+    report = runner.run_isolated_test(art.code, table[:50], ctx=ctx,
+                                      policy=json.loads(old.policy_json),
+                                      expected=expected, key_field=id_field)
+    if report["status"] == "refused":
+        job.status = "failed"
+        job.report_json = json.dumps(report)
+        job.report_sha256 = report["report_sha256"]
+        db.commit()
+        raise HTTPException(status_code=422, detail={"error": "static checks refused execution",
+                                                     "violations": report["violations"]})
+    job.status = report["status"]
+    job.report_json = json.dumps(report)
+    job.report_sha256 = report["report_sha256"]
+    if report["status"] == "passed":
+        art.status = "test_passed"
+    db.commit()
+    audit_mod.append(db, "test.rerun", {"job_id": job.id, "prior_job_id": old.id,
+                                        "artifact_id": art.id, "status": job.status,
+                                        "result_class": report.get("result_class")})
+    db.commit()
+    return {"job_id": job.id, "prior_job_id": old.id, "status": job.status,
+            "result_class": report.get("result_class"), "report": report}
 
 
 # ── Read-back endpoints (from the deployment repo): the single-worker UI polls
@@ -982,9 +1045,13 @@ class ApprovalBody(BaseModel):
 
 
 @app.post("/api/approvals/activation", dependencies=[Depends(require_tester)])
-def activation_approval(body: ApprovalBody, db: Session = Depends(get_db)):
-    """Separate human decision AFTER tests pass. Rejects stale/mismatched evidence."""
-    from backend.models import Approval, GeneratedArtifact, TestJob
+def activation_approval(body: ApprovalBody, request: Request = None,
+                        db: Session = Depends(get_db)):
+    """Separate human decision AFTER tests pass. Rejects stale/mismatched evidence.
+    The audit entry records the plan sha, artifact sha and actor so approve-at-
+    create (same path) is indistinguishable in evidence quality from a Verify-
+    step approval."""
+    from backend.models import Approval, GeneratedArtifact, GenerationPlan, TestJob
     art = db.get(GeneratedArtifact, body.artifact_id)
     if art is None:
         raise HTTPException(status_code=404, detail={"error": "artifact not found"})
@@ -1001,9 +1068,22 @@ def activation_approval(body: ApprovalBody, db: Session = Depends(get_db)):
     db.add(Approval(id=str(uuid.uuid4()), kind="activation", artifact_id=art.id,
                     code_sha256=art.code_sha256, job_id=body.job_id,
                     decided_at=now_iso(), note=body.note))
+    plan_row = db.get(GenerationPlan, art.plan_id)
+    actor = _caller_role_for_gates(db, request)
+    actor_name = "service" if actor == "service" else None
+    if actor_name is None:
+        auth = (request.headers.get("Authorization", "") if request is not None else "")
+        presented = auth[7:].strip() if auth.startswith("Bearer ") else ""
+        from backend import identity as _ident
+        _u = _ident.user_for_token(db, presented)
+        actor_name = _u.username if _u else "unknown"
     db.commit()
     audit_mod.append(db, "artifact.activated", {"artifact_id": art.id,
-                                                "code_sha256": art.code_sha256[:16]})
+                                                "code_sha256": art.code_sha256[:16],
+                                                "plan_sha256": (plan_row.plan_sha256[:16] if plan_row else None),
+                                                "job_id": body.job_id,
+                                                "actor": actor_name,
+                                                "via": "approve_at_create" if body.note == "approve-at-create" else "verify_step"})
     db.commit()
     return {"artifact_id": art.id, "status": "activated", "code_sha256": art.code_sha256}
 

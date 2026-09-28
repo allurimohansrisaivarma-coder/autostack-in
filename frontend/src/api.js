@@ -69,7 +69,7 @@ export const api = {
   listPlanArtifacts: (planId) => request(`/api/plans/${encodeURIComponent(planId)}/artifacts`),
   createTestJob: (artifactId, consent = true) => request('/api/test-jobs', { method: 'POST', body: { artifact_id: artifactId, fixture: 'reset', consent } }),
   getTestJob: (jobId) => request(`/api/test-jobs/${encodeURIComponent(jobId)}`),
-  approveActivation: (artifactId, jobId) => request('/api/approvals/activation', { method: 'POST', body: { artifact_id: artifactId, job_id: jobId, note: 'approved in app' } }),
+  approveActivation: (artifactId, jobId) => request('/api/approvals/activation', { method: 'POST', body: { artifact_id: artifactId, job_id: jobId, note: 'approve-at-create' } }),
   createWorkflowFromPlan: (planId, context) => request(`/api/plan/${encodeURIComponent(planId)}/create-workflow`, { method: 'POST', body: context || {} }),
   openChangeRequest: (body) => request('/api/change-requests', { method: 'POST', body }),
   changeRequests: () => request('/api/change-requests'),
@@ -164,4 +164,12 @@ export const api = {
   connectors: () => request('/api/connectors'),
   aiMode: () => request('/api/system/ai-mode'),
   nodeCatalog: () => request('/api/nodes/catalog'),
+
+  // ── Tool registry + AI autopilot (Create Automation upgrade) ──
+  tools: (params) => {
+    const qs = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v !== '' && v != null)).toString();
+    return request(`/api/tools${qs ? `?${qs}` : ''}`);
+  },
+  toolCategories: () => request('/api/tools/categories'),
+  aiAutopilot: (body) => request('/api/ai/autopilot', { method: 'POST', body }),
 };
