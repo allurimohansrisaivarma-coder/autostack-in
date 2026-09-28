@@ -69,7 +69,15 @@ def require_principal(request: Request, db: Session = Depends(get_db)) -> _Princ
     org = teams.primary_org(db)
     m = db.scalar(select(Membership).where(Membership.org_id == org.id,
                                            Membership.user_id == user.id))
-    role = m.role if m else ("owner" if user.is_admin else "observer")
+    if m is not None:
+        role = m.role
+    elif user.is_admin:
+        role = "owner"
+    else:
+        # Create-flow bugfix: fall back to operator (registration's own default).
+        # The old observer fallback contradicted registration and locked every
+        # mutating route behind a false 403 for provisioned accounts.
+        role = "operator"
     return _Principal("user", user, role)
 
 
@@ -103,8 +111,12 @@ def auth_register(body: RegisterBody, db: Session = Depends(get_db)):
     try:
         user = identity.create_user(db, body.username, body.password, body.display_name)
         org = teams.primary_org(db)
+        # Registration grants OPERATOR unless this is the very first account
+        # (which administers the machine). Observers are created deliberately
+        # by an owner via Members & organization — never by default.
         teams.add_member(db, org.id, user.id, "owner" if user.is_admin else "operator")
-        return {"user_id": user.id, "username": user.username, "is_admin": user.is_admin}
+        return {"user_id": user.id, "username": user.username, "is_admin": user.is_admin,
+                "role": "owner" if user.is_admin else "operator"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
@@ -159,6 +171,80 @@ def auth_me(request: Request, db: Session = Depends(get_db)):
                 "display_name": principal.user.display_name, "is_admin": principal.user.is_admin}
     return {"principal": principal.kind, "role": principal.role, "user": user,
             "capabilities": caps}
+
+
+# ── Phase B: entitlements ──────────────────────────────────────────────────
+
+# Organization context catalog (product §5): the create flow's cascading
+# selectors are driven entirely by this catalog — one source of truth shared
+# with backend/teams.py validation. Kept here (not hardcoded in the UI).
+@router.get("/org/catalog")
+def org_catalog():
+    """Organization types, per-type sizes, departments, and per-department
+    process types. Public (no auth): the create wizard needs it pre-login too."""
+    return {
+        "org_types": list(teams.ORG_TYPES),
+        "sizes_for_type": {k: list(v) for k, v in teams.ORG_SIZES_FOR_TYPE.items()},
+        "departments": {k: list(v) for k, v in teams.DEPARTMENTS.items()},
+        "process_types": {k: list(v) for k, v in teams.PROCESS_TYPES.items()},
+        "default_process_types": list(teams._DEFAULT_PROCESS_TYPES),
+        "labels": {
+            "org_type": {t: t.replace("_", " ").title() for t in teams.ORG_TYPES},
+            "size": {s: {"solo": "Solo", "small": "Small", "medium": "Medium",
+                         "large": "Large / Enterprise"}[s] for s in teams.ORG_SIZES},
+            "department": {d: d.replace("_", " ").title()
+                           for ds in teams.DEPARTMENTS.values() for d in ds},
+            "process_type": {p: p.replace("_", " ").title()
+                             for ps in teams.PROCESS_TYPES.values() for p in ps},
+        },
+    }
+
+
+@router.get("/org/profile", dependencies=[Depends(require_principal)])
+def org_profile(db: Session = Depends(get_db)):
+    """The workspace's current organization type/size/department (owner-settable
+    via /org/profile with the same validation as the create wizard)."""
+    org = teams.primary_org(db)
+    raw = db.get(Setting, "org_profile")
+    profile = {}
+    if raw is not None:
+        try:
+            profile = json.loads(raw.value_json)
+        except Exception:
+            profile = {}
+    return {"org": {"id": org.id, "name": org.name, "tier": org.tier},
+            "profile": profile}
+
+
+class OrgProfileBody(BaseModel):
+    org_type: str
+    size: str
+    department: str
+
+
+@router.post("/org/profile", dependencies=[Depends(admin_guard)])
+def org_profile_set(body: OrgProfileBody, db: Session = Depends(get_db)):
+    # department-level validation only: the workspace default has no process type
+    if body.org_type not in teams.ORG_TYPES:
+        raise HTTPException(status_code=422, detail={"error": f"unknown organization type: {body.org_type}"})
+    if body.size not in teams.ORG_SIZES_FOR_TYPE.get(body.org_type, ()):
+        raise HTTPException(status_code=422, detail={"error": f"invalid size for {body.org_type}"})
+    if body.department not in teams.DEPARTMENTS.get(body.org_type, ()):
+        raise HTTPException(status_code=422, detail={"error": f"unknown department for {body.org_type}"})
+    row = db.get(Setting, "org_profile")
+    payload = json.dumps({"org_type": body.org_type, "size": body.size,
+                          "department": body.department})
+    if row is None:
+        row = Setting(key="org_profile", value_json=payload)
+        db.add(row)
+    else:
+        row.value_json = payload
+    db.commit()
+    from backend.security import audit as audit_mod
+    audit_mod.append(db, "org.profile_set", {**body.model_dump()})
+    db.commit()
+    return {"profile": {"org_type": body.org_type, "size": body.size,
+                        "department": body.department}}
 
 
 # ── Phase B: entitlements ────────────────────────────────────────────────────
@@ -216,6 +302,10 @@ class ProcessBody(BaseModel):
     name: str
     description: str = ""
     run_quota_per_day: int = 0
+    org_type: str = ""
+    size: str = ""
+    department: str = ""
+    process_type: str = ""
 
 
 class AttachBody(BaseModel):
@@ -315,16 +405,28 @@ def team_revoke_invitation(invitation_id: str, db: Session = Depends(get_db)):
 def processes_list(db: Session = Depends(get_db)):
     org = teams.primary_org(db)
     return {"processes": [{"id": p.id, "name": p.name, "description": p.description,
-                           "run_quota_per_day": p.run_quota_per_day} for p in teams.list_processes(db, org.id)]}
+                           "run_quota_per_day": p.run_quota_per_day,
+                           "org_type": p.org_type, "size": p.size,
+                           "department": p.department, "process_type": p.process_type}
+                          for p in teams.list_processes(db, org.id)]}
 
 
 @router.post("/processes", dependencies=[Depends(admin_guard)])
 def processes_create(body: ProcessBody, db: Session = Depends(get_db)):
     org = teams.primary_org(db)
+    if body.org_type or body.department or body.process_type:
+        problems = teams.valid_context(body.org_type, body.size, body.department,
+                                       body.process_type)
+        if problems:
+            raise HTTPException(status_code=422, detail={"error": "; ".join(problems)})
     try:
         p = teams.create_process(db, org.id, body.name, body.description, body.run_quota_per_day)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+    # context columns are plain values (validated above when provided)
+    p.org_type, p.size = body.org_type, body.size
+    p.department, p.process_type = body.department, body.process_type
+    db.commit()
     return {"process_id": p.id, "name": p.name}
 
 
@@ -401,7 +503,7 @@ def triggers_list(db: Session = Depends(get_db)):
     return {"triggers": orchestration.list_triggers(db)}
 
 
-@router.post("/triggers", dependencies=[Depends(admin_guard)])
+@router.post("/triggers", dependencies=[Depends(require_writer)])
 def triggers_create(body: TriggerBody, db: Session = Depends(get_db)):
     try:
         row, secret = orchestration.create_trigger(db, body.workflow_id, body.kind,
@@ -415,14 +517,14 @@ def triggers_create(body: TriggerBody, db: Session = Depends(get_db)):
     return out
 
 
-@router.post("/triggers/{trigger_id}/enable", dependencies=[Depends(admin_guard)])
+@router.post("/triggers/{trigger_id}/enable", dependencies=[Depends(require_writer)])
 def triggers_enable(trigger_id: str, db: Session = Depends(get_db)):
     if not orchestration.set_trigger_enabled(db, trigger_id, True):
         raise HTTPException(status_code=404, detail={"error": "trigger not found"})
     return {"enabled": True}
 
 
-@router.post("/triggers/{trigger_id}/disable", dependencies=[Depends(admin_guard)])
+@router.post("/triggers/{trigger_id}/disable", dependencies=[Depends(require_writer)])
 def triggers_disable(trigger_id: str, db: Session = Depends(get_db)):
     if not orchestration.set_trigger_enabled(db, trigger_id, False):
         raise HTTPException(status_code=404, detail={"error": "trigger not found"})

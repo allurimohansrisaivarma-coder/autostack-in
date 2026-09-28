@@ -176,9 +176,20 @@ body, .card, .main { transition: background 0.2s ease, color 0.2s ease, border-c
 /* ─── Main ───────────────────────────────────────────────────────────────────── */
 /* Floating-nav shell: content spans the full viewport width; the floating
    nav floats above it. Top padding leaves breathing room under the pill. */
-.main { overflow-x: clip; min-height: 100vh; padding-top: 92px; }
-
-.screen { padding: 26px 32px 44px; margin: 0 auto; max-width: 1180px; width: 100%; }
+.main { overflow-x: clip; min-height: 100vh; padding-top: 92px; }.screen {
+  padding: 26px 32px 44px;
+  margin: 0 auto;
+  max-width: 1180px;
+  width: 100%;
+  /* fluid ultra-narrow support: never squeeze below the content's minimum */
+  min-width: 0;
+}
+@media (max-width: 480px) {
+  .screen { padding: 20px 14px 36px; }
+}
+@media (min-width: 1600px) {
+  .screen { max-width: 1280px; padding: 30px 40px 52px; }
+}
 
 .screen-header {
   display: flex;
@@ -186,6 +197,10 @@ body, .card, .main { transition: background 0.2s ease, color 0.2s ease, border-c
   justify-content: space-between;
   margin-bottom: 22px;
   gap: 16px;
+  flex-wrap: wrap;
+}
+@media (max-width: 480px) {
+  .screen-header { gap: 10px; }
 }
 
 .screen-header h2 {

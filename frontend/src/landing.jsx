@@ -61,7 +61,7 @@ function AnimatedTabs() {
   );
 }
 
-function LandingNav({ scrolled, onSignIn, onSignUp }) {
+function LandingNav({ scrolled, onSignIn, onSignUp, onHome }) {
   return (
     <motion.nav
       className={`landing-nav glass${scrolled ? ' glass-strong scrolled' : ''}`}
@@ -69,7 +69,10 @@ function LandingNav({ scrolled, onSignIn, onSignUp }) {
       animate={{ y: 0, opacity: 1 }}
       transition={{ ...spring.gentle, delay: dur(150) }}
     >
-      <span className="ln-brand" aria-label="AutoStack IN"><ThemeLogo lockup={false} h={30} /></span>
+      <button className="ln-brand" aria-label="AutoStack IN — home" title="Home"
+              onClick={onHome || (() => scrollToId('top'))}>
+        <ThemeLogo lockup={false} h={36} />
+      </button>
       <AnimatedTabs />
       <span style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
         <button className="ln-link" onClick={onSignIn}>Sign in</button>
@@ -316,9 +319,10 @@ export function Landing({ onSignUp, onSignIn, workerUp }) {
   }, []);
   const signup = () => onSignUp();
   const signin = () => onSignIn();
+  const goHome = () => { window.scrollTo({ top: 0, behavior: LEVEL.cinematic ? 'smooth' : 'auto' }); };
   return (
-    <div className="landing">
-      <LandingNav scrolled={scrolled} onSignIn={signin} onSignUp={signup} />
+    <div className="landing" id="top">
+      <LandingNav scrolled={scrolled} onSignIn={signin} onSignUp={signup} onHome={goHome} />
       <Hero onGetStarted={signup} onSignIn={signin} workerUp={workerUp} />
       <ProductReveal />
       <Capabilities />
@@ -388,13 +392,25 @@ export function AppHome({ setPage }) {
 }
 
 // ─── Auth hero (login/signup with landing context) ───────────────────────────
-export function AuthScreen({ children }) {
+// Uses the SAME floating pill navbar as the marketing landing (single navbar
+// design across public pages); the hero below carries the full lockup.
+export function AuthScreen({ children, onSignIn, onSignUp }) {
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
   return (
     <div className="landing auth-landing">
       <AmbientBackground />
+      {onSignIn && onSignUp && (
+        <LandingNav scrolled={scrolled} onSignIn={onSignIn} onSignUp={onSignUp}
+                    onHome={() => { window.scrollTo({ top: 0, behavior: 'auto' }); }} />
+      )}
       <div className="auth-hero" style={{ position: 'relative', zIndex: 2 }}>
         <Reveal className="ah-copy">
-          <span className="ah-brand"><ThemeLogo h={40} glow /></span>
+          <span className="ah-brand"><ThemeLogo h={44} /></span>
           <h1>Automation that earns <span className="grad">trust</span>.</h1>
           <p>Your account lives on this machine — the first account administers it.
              Automations run in a sandbox and activate only after human approval.</p>

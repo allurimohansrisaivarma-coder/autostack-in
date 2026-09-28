@@ -36,13 +36,14 @@ async function pollOnce() {
   const next = { ...state.data };
   let connected = false;
   try {
-    const [cands, notes, audit, lastRun, workflows, runs] = await Promise.all([
+    const [cands, notes, audit, lastRun, workflows, runs, me] = await Promise.all([
       api.candidates(),
       api.notifications(),
       api.audit ? api.audit() : Promise.resolve(null),
       api.lastRun().catch(() => null),
       api.listWorkflows ? api.listWorkflows().catch(() => []) : Promise.resolve([]),
       api.listRuns ? api.listRuns().catch(() => []) : Promise.resolve([]),
+      api.authMe().catch(() => null),
     ]);
     next.candidates = Array.isArray(cands) ? cands : [];
     next.notifications = Array.isArray(notes) ? notes : [];
@@ -50,6 +51,7 @@ async function pollOnce() {
     next.lastRun = lastRun;
     next.workflows = (workflows && workflows.workflows) || [];
     next.runs = (runs && runs.runs) || [];
+    if (me) next.me = me; // {role, user, capabilities} — role-aware UI gating
     connected = true;
   } catch {
     connected = false; // demo mode keeps prior data; nothing invented

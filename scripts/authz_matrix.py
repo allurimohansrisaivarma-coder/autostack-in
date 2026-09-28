@@ -183,6 +183,30 @@ for role in ROLES:
                 token=TOKENS[role])
     expect(role, "POST /api/registry/publish", s, (200,) if role == "owner" else (403,))
 
+print("\n== registry import (operator+) and withdraw (publish-level, owner) ==")
+for role in ROLES:
+    s, _ = call("POST", "/api/registry/import", {"template_id": "nonexistent",
+                                                 "local_mapping": {}}, token=TOKENS[role])
+    expect(role, "POST /api/registry/import", s,
+           (403,) if role == "observer" else (200, 400, 404, 409, 422), "contract error ok")
+for role in ROLES:
+    s, _ = call("POST", "/api/registry/withdraw", {"slug": "mx-nope"}, token=TOKENS[role])
+    expect(role, "POST /api/registry/withdraw", s,
+           (403,) if role in ("observer", "operator", "approver") else (200, 404, 400, 422),
+           "contract error ok")
+
+print("\n== trigger management: operator+ (workflow operations, not admin) ==")
+for role in ROLES:
+    s, _ = call("POST", "/api/triggers", {"workflow_id": WID, "kind": "file",
+                                          "config": {"alias": "sample-tracking-file"},
+                                          "evidence_note": "mx"}, token=TOKENS[role])
+    expect(role, "POST /api/triggers", s, (403,) if role == "observer" else (200, 400, 404, 409, 422),
+           "contract error ok")
+for role in ROLES:
+    s, _ = call("POST", f"/api/triggers/{TRIG}/disable", token=TOKENS[role])
+    expect(role, f"POST /api/triggers/{'{id}'}/disable", s,
+           (403,) if role == "observer" else (200, 404), "contract error ok")
+
 print("\n== admin-level operations (observer/operator/approver denied) ==")
 ADMIN_OPS = [
     ("POST", "/api/org/tier", {"tier": "solo"}),
@@ -190,8 +214,6 @@ ADMIN_OPS = [
     ("POST", "/api/team/invitations", {"role": "observer"}),
     ("POST", "/api/processes", {"name": "mx-proc"}),
     ("POST", "/api/runners", {"name": "mx-runner", "kind": "local"}),
-    ("POST", "/api/triggers", {"workflow_id": WID, "kind": "file",
-                                "config": {"alias": "clients"}, "evidence_note": "mx"}),
     ("POST", "/api/workflows/{WID}/parameters", {"parameters": []}),
     ("POST", "/api/registry/templates/nonexistent/review", {"decision": "approve"}),
 ]
@@ -241,11 +263,17 @@ check("service: node callback passes (bridge compatibility)", s in (200, 400, 40
 print("\n== reads: every role allowed ==")
 READ_PATHS = ["/api/workflows", "/api/runs/list", "/api/candidates", "/api/notifications",
               "/api/audit?limit=5", "/api/team/members", "/api/me/capabilities",
-              "/api/privacy/ledger", "/api/connectors", "/api/triggers"]
+              "/api/privacy/ledger", "/api/connectors", "/api/triggers", "/api/org/profile"]
 for path in READ_PATHS:
     for role in ROLES:
         s, _ = call("GET", path, token=TOKENS[role])
         expect(role, f"GET {path.split('?')[0]}", s, (200,))
+
+print("\n== org catalog: public context source for the create wizard ==")
+s, b = call("GET", "/api/org/catalog", token="")
+check("anon: GET /api/org/catalog -> 200", s == 200, str(s))
+check("catalog covers corporate/government/individual",
+      s == 200 and all(t in b.get("org_types", []) for t in ("corporate", "government", "individual")))
 
 print("\n== unauthenticated: everything denied ==")
 UNAUTH = [("GET", "/api/workflows"), ("POST", "/api/runs", {"workflow_id": WID}),

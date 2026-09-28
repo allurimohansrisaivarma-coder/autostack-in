@@ -181,6 +181,74 @@ function SecuritySection({ identity }) {
 }
 
 // ── Organization: owner-only administration; others get real state ────────────
+function OrgProfileCard({ isOwner }) {
+  const [profile, setProfile] = useState(null);
+  const [catalog, setCatalog] = useState(null);
+  const [draft, setDraft] = useState({ org_type: '', size: '', department: '' });
+  const [result, setResult] = useState(null);
+
+  async function refresh() {
+    try {
+      const p = await api.orgProfile();
+      setProfile(p.profile || {});
+      setDraft({ org_type: (p.profile && p.profile.org_type) || 'corporate',
+                 size: (p.profile && p.profile.size) || 'medium',
+                 department: (p.profile && p.profile.department) || 'finance' });
+      setCatalog(await api.orgCatalog());
+    } catch (e) { setResult(e.message); }
+  }
+  useState(() => { refresh(); });
+
+  async function save() {
+    setResult(null);
+    try {
+      await api.setOrgProfile(draft.org_type, draft.size, draft.department);
+      await refresh();
+      setResult('Organization profile saved — new workflows default to this context.');
+    } catch (e) { setResult(e.message); }
+  }
+
+  const sizes = (catalog && catalog.sizes_for_type[draft.org_type]) || [];
+  const depts = (catalog && catalog.departments[draft.org_type]) || [];
+  const label = (kind, v) => (catalog && catalog.labels[kind] && catalog.labels[kind][v]) || v;
+
+  return (
+    <Card title="Organization profile">
+      <p className="muted">Type, size, and department drive which departments and process types the create wizard offers. Government agencies, companies of any size, and individuals are all first-class.</p>
+      {catalog && isOwner ? (
+        <>
+          <div className="form-grid">
+            <label>Organization type
+              <select value={draft.org_type} onChange={e => setDraft({ ...draft, org_type: e.target.value })}>
+                {catalog.org_types.map(t => <option key={t} value={t}>{catalog.labels.org_type[t] || t}</option>)}
+              </select>
+            </label>
+            <label>Size
+              <select value={draft.size} onChange={e => setDraft({ ...draft, size: e.target.value })} disabled={sizes.length === 1}>
+                {sizes.map(s => <option key={s} value={s}>{catalog.labels.size[s] || s}</option>)}
+              </select>
+            </label>
+            <label>Primary department
+              <select value={draft.department} onChange={e => setDraft({ ...draft, department: e.target.value })}>
+                {depts.map(d => <option key={d} value={d}>{catalog.labels.department[d] || d}</option>)}
+              </select>
+            </label>
+          </div>
+          <button className="btn" onClick={save}>Save organization profile</button>
+        </>
+      ) : profile ? (
+        <Row><div>
+          {label('org_type', profile.org_type) || '—'} · {label('size', profile.size) || '—'} · {label('department', profile.department) || '—'}
+          {!isOwner && <span className="muted"> (changing it requires the owner role)</span>}
+        </div></Row>
+      ) : (
+        <div className="muted">Loading…</div>
+      )}
+      {result && <div className="muted">{result}</div>}
+    </Card>
+  );
+}
+
 function OrganizationSection({ identity, setPage }) {
   const caps = identity && identity.capabilities;
   const isOwner = identity && identity.role === 'owner';
@@ -215,6 +283,7 @@ function OrganizationSection({ identity, setPage }) {
         </div>
         {result && <div className="muted">{result}</div>}
       </Card>
+      <OrgProfileCard isOwner={isOwner} />
       <div className="grid2">
         <Gate capability="retention_admin" caps={caps}>
           <Card title="Data & privacy (retention admin)">

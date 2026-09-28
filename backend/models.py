@@ -301,13 +301,23 @@ class Invitation(Base):
 
 
 class Process(Base):
-    """Roadmap Phase C: business-process grouping (owning org, quotas, retention)."""
+    """Roadmap Phase C: business-process grouping (owning org, quotas, retention).
+
+    Context model (product §5): a process belongs to an organization TYPE
+    (corporate / government / individual / nonprofit / education) with a SIZE
+    (solo/small/medium/large), a DEPARTMENT (per org type), and a PROCESS TYPE
+    (per department) — the create flow cascades these so only coherent choices
+    are offered. Existing rows keep "" defaults (legacy = unclassified)."""
     __tablename__ = "processes"
     id: Mapped[str] = mapped_column(String(24), primary_key=True)
     org_id: Mapped[str] = mapped_column(String(24), ForeignKey("orgs.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     run_quota_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0 = unlimited
+    org_type: Mapped[str] = mapped_column(String(24), nullable=False, default="")   # corporate|government|individual|nonprofit|education
+    size: Mapped[str] = mapped_column(String(16), nullable=False, default="")       # solo|small|medium|large
+    department: Mapped[str] = mapped_column(String(40), nullable=False, default="")  # per teams.DEPARTMENTS[org_type]
+    process_type: Mapped[str] = mapped_column(String(40), nullable=False, default="")  # per teams.PROCESS_TYPES[department]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

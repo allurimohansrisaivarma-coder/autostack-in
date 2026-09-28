@@ -3,7 +3,10 @@
    Effect gates: html[data-fx="reduced"] kills all decorative motion,
    html[data-fx="touch"] removes pointer-only effects. ═══ */
 
-/* ─── Brand: real logo assets, theme-switched ──────────────────────────────── */
+/* ─── Brand: real logo assets, theme-switched, no filters ─────────────────── */
+/* Light theme → metallic lockup with dark text; dark theme → same metallic
+   lockup with white text. Swap is driven purely by [data-theme]; no drop-
+   shadows, glows or filters on any state (see scripts/process_logos.py). */
 .theme-logo {
   display: inline-flex; align-items: center; position: relative; flex-shrink: 0;
 }
@@ -11,30 +14,6 @@
 .theme-logo .logo-dark { display: none; }
 [data-theme="dark"] .theme-logo .logo-dark { display: block; }
 [data-theme="dark"] .theme-logo .logo-light { display: none; }
-/* Forced-dark surface: always the white lockup regardless of theme — for
-   surfaces that stay dark in both themes (the floating-nav glass chip). */
-.theme-logo.logo-forced-dark .logo-dark { display: block; }
-.theme-logo.logo-forced-dark .logo-light { display: none; }
-[data-theme="dark"] .theme-logo.logo-forced-dark .logo-dark { display: block; }
-[data-theme="dark"] .theme-logo.logo-forced-dark .logo-light { display: none; }
-.theme-logo.logo-glow img { filter: drop-shadow(0 4px 18px rgba(120, 150, 255, 0.18)); }
-
-/* Logo chip: guarantees contrast for the mark on any surface. Slightly dark
-   tile + hairline border + faint highlight; the white mark reads clearly on
-   it in both themes. */
-.logo-chip {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
-  background: linear-gradient(155deg, #1b2230 0%, #10141d 100%);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 1px 2px rgba(2, 6, 23, 0.35);
-}
-.logo-chip .theme-logo img { filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.45)); }
-.logo-chip .theme-logo .logo-dark { display: block; }
-.logo-chip .theme-logo .logo-light { display: none; }
-[data-theme="light"] .logo-chip .theme-logo .logo-dark { display: block; }
-[data-theme="light"] .logo-chip .theme-logo .logo-light { display: none; }
-[data-theme="dark"] .theme-logo.logo-glow img { filter: drop-shadow(0 4px 22px rgba(190, 210, 255, 0.28)); }
 
 /* ─── Brand tile (inline-SVG fallback; light: blue / dark: glass-white) ───── */
 .brand-tile {
@@ -51,8 +30,6 @@
   color: #fff;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 10px rgba(0, 0, 0, 0.35);
 }
-.brand-tile.brand-glow { box-shadow: 0 8px 28px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255,255,255,.3); }
-[data-theme="dark"] .brand-tile.brand-glow { box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 24px rgba(148, 178, 255, 0.12), inset 0 1px 0 rgba(255,255,255,.2); }
 
 /* ─── Glass material (functional layer for nav/controls, not content) ───────── */
 .glass {
@@ -136,11 +113,32 @@ html[data-fx="touch"] .pcard::before, html[data-fx="reduced"] .pcard::before { d
 /* ─── Landing: hero ─────────────────────────────────────────────────────────── */
 .landing { position: relative; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: clip; }
 .landing-nav {
-  position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
-  z-index: 60; display: flex; align-items: center; gap: 18px;
-  padding: 8px 10px 8px 14px; border-radius: 999px; min-width: 0; max-width: min(92vw, 720px);
+  /* Centered with margins, not translateX: framer-motion writes an inline
+     transform for the entrance animation, which would override translateX
+     and shove the pill to the right edge. */
+  position: fixed; top: 14px; left: 0; right: 0; margin-inline: auto;
+  width: fit-content; max-width: min(92vw, 760px);
+  z-index: 60; display: flex; align-items: center; gap: 16px;
+  padding: 8px 10px 8px 12px; border-radius: 999px; min-width: 0;
 }
-.landing-nav .ln-brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14px; letter-spacing: -0.01em; white-space: nowrap; }
+/* ONE refined edge for BOTH floating pills (public + app): 1px hairline in
+   the theme's own text color at 14% — light mode renders a soft slate line
+   on the frosted panel, dark mode a soft white line. Clearly defines the
+   pill against any background without ever reading as a hard outline; the
+   .glass::before top highlight keeps the premium lensed feel. */
+.landing-nav,
+.floating-nav {
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+}
+html[data-fx="reduced"] .landing-nav,
+html[data-fx="reduced"] .floating-nav { border-color: var(--border-strong); }
+.landing-nav .ln-brand {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+  padding: 0 4px; border: none; background: none; cursor: pointer; border-radius: 12px;
+}
+.landing-nav .ln-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.landing-nav .ln-brand .theme-logo { height: 36px; }
+.landing-nav .ln-brand .theme-logo img { filter: none; box-shadow: none; }
 .landing-nav .ln-links { display: flex; gap: 2px; }
 .ln-link {
   font-size: 13px; font-weight: 550; color: var(--text-2);
@@ -311,6 +309,7 @@ html[data-fx="dark"] .btn-hero, [data-theme="dark"] .btn-hero { color: #0b1220; 
 .auth-hero .ah-copy h1 { font-size: clamp(34px, 4.6vw, 54px); letter-spacing: -0.035em; line-height: 1.06; font-weight: 700; }
 .auth-hero .ah-copy p { color: var(--text-2); font-size: 16px; line-height: 1.6; max-width: 46ch; }
 .auth-hero .ah-brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 16px; }
+.auth-hero .ah-brand .theme-logo { height: 44px; }
 .auth-points { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 .auth-points .ap { display: flex; gap: 10px; align-items: center; font-size: 14px; color: var(--text-2); }
 .auth-points .ap svg { color: var(--ok); flex-shrink: 0; }
@@ -499,6 +498,12 @@ html[data-theme="light"] .cs-frame { box-shadow: 0 40px 80px -30px rgba(15, 23, 
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center;
   max-width: 1120px; margin: 0 auto; padding: 46px 24px 60px;
 }
+/* ultra-narrow: wrap the two-column footer instead of clipping it */
+@media (max-width: 560px) {
+  .landing-footer { grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center; gap: 14px; }
+  .lf-links { flex-wrap: wrap; justify-content: center; row-gap: 6px; }
+  .lf-copy { max-width: 100%; }
+}
 .landing-footer .lf-copy { color: var(--text-3); font-size: 13px; line-height: 1.6; }
 .landing-footer .lf-copy strong { color: var(--text); }
 .lf-links { display: flex; gap: 18px; }
@@ -506,13 +511,16 @@ html[data-theme="light"] .cs-frame { box-shadow: 0 40px 80px -30px rgba(15, 23, 
 .lf-links button:hover { color: var(--text); }
 
 /* ═══ Floating navigation system (replaces the sidebar) ═══════════════════
-   One object, three states: desktop pill with dropdowns, compact top bar on
-   tablet, top bar + grouped sheet on mobile. Material reuses .glass. */
+   Signed-in twin of the public landing pill: SAME floating centered glass
+   pill — fit-content width, fully rounded, frosted — so there is exactly one
+   navbar design app-wide. It carries the product groups, search, bell and
+   account; dropdown panels anchor below as before. */
 .floating-nav {
-  position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-  width: min(1240px, calc(100vw - 32px)); height: 56px; z-index: 90;
-  display: flex; align-items: center; gap: 8px; padding: 0 12px;
-  border-radius: 17px;
+  position: fixed; top: 14px; left: 0; right: 0; margin-inline: auto;
+  width: fit-content; max-width: min(96vw, 1240px);
+  height: 56px; z-index: 90;
+  display: flex; align-items: center; gap: 8px; padding: 0 14px;
+  border-radius: 999px; min-width: 0;
   transition: box-shadow 0.25s ease, background 0.25s ease;
 }
 .floating-nav.scrolled { box-shadow: 0 12px 32px -14px rgba(2, 6, 23, 0.35); }
@@ -520,6 +528,8 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
 
 .nav-burger { display: none; }
 .fn-brand { display: inline-flex; align-items: center; padding: 4px 6px; border-radius: 10px; background: none; border: none; cursor: pointer; }
+.fn-brand .theme-logo { height: 30px; }
+.fn-brand .theme-logo img { filter: none; box-shadow: none; }
 .fn-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .fn-groups { display: flex; align-items: center; gap: 2px; margin-left: 8px; }
@@ -698,6 +708,10 @@ html[data-theme="light"] .floating-nav.scrolled { box-shadow: 0 12px 30px -16px 
 .app-home .ah-quick-card svg:last-child { margin-left: auto; opacity: 0.5; }
 @media (max-width: 1024px) { .app-home .ah-quick { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px) { .app-home .ah-quick { grid-template-columns: 1fr; } .app-home .ah-hero { padding: 26px 0 30px; } }
+/* midsize phones (321–560px): two quick cards per row instead of one huge card */
+@media (min-width: 460px) and (max-width: 560px) {
+  .app-home .ah-quick { grid-template-columns: repeat(2, 1fr); }
+}
 
 /* ═══ Polish system — unified controls, type scale, tables, states ═══════
    Single override layer (loads last): one spacing rhythm, one control style,
@@ -856,7 +870,9 @@ button.primary:not(:disabled):active { transform: scale(0.98); }
    These overrides MUST live in this file (after the base rules above) so they
    win the cascade against the base .fn-groups/.nav-burger rules. */
 @media (max-width: 860px) {
-  .floating-nav { width: calc(100vw - 16px); top: 8px; height: 54px; }
+  /* Same pill on mobile: centered fit-content bar (burger · logo · search ·
+     bell · account), never a full-width strip — one navbar design everywhere. */
+  .floating-nav { width: fit-content; top: 8px; height: 54px; }
   .fn-groups { display: none; }
   .nav-burger { display: inline-flex; }
   .nav-kbd { display: none; }
@@ -865,6 +881,14 @@ button.primary:not(:disabled):active { transform: scale(0.98); }
   .nav-panel { position: fixed; top: 68px; left: 8px; right: 8px; min-width: 0; width: auto; }
   .nav-panel-4 { grid-template-columns: 1fr; min-width: 0; }
   .notif-panel { position: fixed; top: 68px; left: 8px; right: 8px; width: auto; }
+}
+/* ultra-narrow phones: tighten the app bar so every control fits without
+   overflow (burger + logo + search + bell + avatar on a 320px screen) */
+@media (max-width: 400px) {
+  .floating-nav { height: 52px; gap: 4px; padding: 0 10px; }
+  .nav-icon-btn { padding: 7px; }
+  .fn-brand { padding: 2px 2px; }
+  .nav-account-trigger .avatar { width: 28px; height: 28px; font-size: 11px; }
 }
 
 @media (max-width: 1024px) {

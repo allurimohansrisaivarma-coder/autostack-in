@@ -178,7 +178,10 @@ function NotFound({ setPage }) {
           <p className="muted">That link doesn't match any page in this workspace.</p>
         </div>
       </header>
-      <div><button className="btn" onClick={() => setPage('dashboard')}>Go to Dashboard</button></div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button className="btn" onClick={() => setPage('dashboard')}>Go to Dashboard</button>
+        <button className="btn-outline" onClick={() => setPage('landing')}>Go to Home</button>
+      </div>
     </div>
   );
 }
@@ -231,7 +234,10 @@ function App() {
       />;
     }
     return (
-      <AuthScreen>
+      <AuthScreen
+        onSignIn={() => setAuthMode('login')}
+        onSignUp={() => setAuthMode('signup')}
+      >
         <Login
           setPage={setPage}
           initialMode={authMode}
@@ -254,11 +260,11 @@ function App() {
     notifications: <NotificationCenter />,
     privacy: <DataPrivacy />,
     connectors: <Connectors />,
-    dashboard: <Dashboard setPage={setPage} identity={identity} />,
-    discovery: <Discovery setPage={setPage} identity={identity} />,
+    dashboard: <Dashboard setPage={setPage} />,
+    discovery: <Discovery setPage={setPage} />,
     registry: <Registry identity={identity} />,
-    workflows: <Workflows setPage={setPage} identity={identity} />,
-    create: <CreateAutomation setPage={setPage} identity={identity} />,
+    workflows: <Workflows setPage={setPage} />,
+    create: <CreateAutomation setPage={setPage} />,
     trustlog: <TrustLog />,
   };
   const Screen = screenMap[page] || <NotFound setPage={setPage} />;
