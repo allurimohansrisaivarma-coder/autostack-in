@@ -64,8 +64,11 @@ export const api = {
   audit: () => request('/api/audit?verify=1&limit=50'),
 
   createPlan: (plan, candidateId) => request('/api/plans', { method: 'POST', body: { plan, candidate_id: candidateId } }),
+  getPlan: (planId) => request(`/api/plans/${encodeURIComponent(planId)}`),
   generate: (planId) => request('/api/artifacts/generate', { method: 'POST', body: { plan_id: planId, approve_generation: true } }),
+  listPlanArtifacts: (planId) => request(`/api/plans/${encodeURIComponent(planId)}/artifacts`),
   createTestJob: (artifactId, consent = true) => request('/api/test-jobs', { method: 'POST', body: { artifact_id: artifactId, fixture: 'reset', consent } }),
+  getTestJob: (jobId) => request(`/api/test-jobs/${encodeURIComponent(jobId)}`),
   approveActivation: (artifactId, jobId) => request('/api/approvals/activation', { method: 'POST', body: { artifact_id: artifactId, job_id: jobId, note: 'approved in app' } }),
   createWorkflowFromPlan: (planId, context) => request(`/api/plan/${encodeURIComponent(planId)}/create-workflow`, { method: 'POST', body: context || {} }),
 
@@ -104,6 +107,7 @@ export const api = {
   teamMembers: () => request('/api/team/members'),
   teamAddMember: (username, role) => request('/api/team/members', { method: 'POST', body: { username, role } }),
   teamSetRole: (membershipId, role) => request(`/api/team/members/${encodeURIComponent(membershipId)}/role`, { method: 'POST', body: { role } }),
+  teamSelfRole: (role) => request('/api/team/self-role', { method: 'POST', body: { role } }),
   teamRemoveMember: (membershipId) => request(`/api/team/members/${encodeURIComponent(membershipId)}`, { method: 'DELETE' }),
   teamInvitations: () => request('/api/team/invitations'),
   teamCreateInvitation: (role, ttlHours) => request('/api/team/invitations', { method: 'POST', body: { role, ttl_hours: ttlHours || 72 } }),

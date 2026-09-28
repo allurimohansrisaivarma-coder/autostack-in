@@ -180,10 +180,10 @@ def update_row_field(db: Session, *, run_id: str, alias: str, filename: str, key
     """
     lock = _rmw_lock(alias, filename)
     with lock:
+        current = safeio.read_resource(alias, filename).decode("utf-8-sig")
         effect = journal.effect_key(f"{key_field}:{key_value}", purpose, effect_ns, alias)
         if not journal.claim_effect(db, effect, run_id):
             return {"skipped": True, "reason": "idempotent-claimed", "effect_key": effect}
-        current = safeio.read_resource(alias, filename).decode("utf-8-sig")
         reader = list(csv.reader(io.StringIO(current)))
         header, body = reader[0], reader[1:]
         try:

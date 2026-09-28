@@ -349,6 +349,28 @@ def team_set_role(membership_id: str, body: RoleBody, db: Session = Depends(get_
     return {"updated": True, "role": body.role}
 
 
+@router.post("/team/self-role")
+def team_self_role(body: RoleBody, request: Request, db: Session = Depends(get_db)):
+    """Allow self-promotion in solo workspaces or for admins.
+    Unlocks sandbox test & activation for solo evaluation workflows without breaking team tier rules."""
+    principal = require_principal(request, db)
+    if body.role not in teams.ROLES:
+        raise HTTPException(status_code=400, detail={"error": f"unknown role: {body.role}"})
+    org = teams.primary_org(db)
+    if org.tier != "solo" and not principal.is_admin:
+        raise HTTPException(status_code=403, detail={"error": "self role change is only permitted in solo workspaces or for admins"})
+    if principal.kind != "user" or not principal.user:
+        raise HTTPException(status_code=400, detail={"error": "only user accounts can update roles"})
+    m = db.scalar(select(Membership).where(Membership.org_id == org.id,
+                                           Membership.user_id == principal.user.id))
+    if m is None:
+        teams.add_member(db, org.id, principal.user.id, body.role)
+    else:
+        m.role = body.role
+        db.commit()
+    return {"updated": True, "role": body.role}
+
+
 @router.delete("/team/members/{membership_id}", dependencies=[Depends(admin_guard)])
 def team_remove_member(membership_id: str, db: Session = Depends(get_db)):
     org = teams.primary_org(db)

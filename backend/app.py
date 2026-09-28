@@ -314,7 +314,7 @@ def _is_client_error(exc: BaseException) -> bool:
     from backend.file_diff import InvalidFixture
     e, seen = exc, 0
     while e is not None and seen < 5:
-        if isinstance(e, (InvalidFixture, ClientDataError)):
+        if isinstance(e, (InvalidFixture, ClientDataError, FileNotFoundError)):
             return True
         e = e.__cause__ or e.__context__
         seen += 1
@@ -773,6 +773,50 @@ def create_plan(body: PlanBody, db: Session = Depends(get_db)):
             "generatable": not missing, "plan_sha256": row.plan_sha256}
 
 
+@app.get("/api/plans/{plan_id}", dependencies=[Depends(require_writer)])
+def get_plan(plan_id: str, db: Session = Depends(get_db)):
+    from backend.models import GenerationPlan
+    plan_row = db.get(GenerationPlan, plan_id)
+    if plan_row is None:
+        raise HTTPException(status_code=404, detail={"error": "plan not found"})
+    return {
+        "plan_id": plan_row.id,
+        "candidate_id": plan_row.candidate_id,
+        "plan": json.loads(plan_row.plan_json),
+        "plan_sha256": plan_row.plan_sha256,
+        "status": plan_row.status,
+        "missing_rules": json.loads(plan_row.missing_rules_json or "[]"),
+        "created_at": plan_row.created_at,
+    }
+
+
+@app.get("/api/plans/{plan_id}/artifacts", dependencies=[Depends(require_writer)])
+def list_plan_artifacts(plan_id: str, db: Session = Depends(get_db)):
+    from backend.models import Approval, GeneratedArtifact, TestJob
+    arts = (db.query(GeneratedArtifact)
+            .filter(GeneratedArtifact.plan_id == plan_id)
+            .order_by(GeneratedArtifact.version.desc()).all())
+    out = []
+    for a in arts:
+        job = (db.query(TestJob)
+               .filter(TestJob.artifact_id == a.id)
+               .order_by(TestJob.created_at.desc()).first())
+        approval = (db.query(Approval)
+                    .filter(Approval.artifact_id == a.id, Approval.kind == "activation").first())
+        out.append({
+            "artifact_id": a.id,
+            "plan_id": a.plan_id,
+            "version": a.version,
+            "code_sha256": a.code_sha256,
+            "status": a.status,
+            "violations": json.loads(a.static_check_json or "[]"),
+            "created_at": a.created_at,
+            "last_job": {"job_id": job.id, "status": job.status, "report": json.loads(job.report_json or "{}")} if job else None,
+            "approval": {"approval_id": approval.id, "decided_at": approval.decided_at} if approval else None,
+        })
+    return {"artifacts": out}
+
+
 class GenerateBody(BaseModel):
     plan_id: str
     approve_generation: bool
@@ -836,7 +880,9 @@ def create_test_job(body: TestJobBody, db: Session = Depends(get_db)):
     art = db.get(GeneratedArtifact, body.artifact_id)
     if art is None:
         raise HTTPException(status_code=404, detail={"error": "artifact not found"})
-    if art.status != "awaiting_test_approval":
+    if art.status == "activated":
+        raise HTTPException(status_code=409, detail={"error": "artifact already activated"})
+    if art.status not in ("awaiting_test_approval", "test_passed"):
         raise HTTPException(status_code=409, detail={"error": f"artifact not testable in state {art.status}"})
     if body.fixture == "reset":
         fixture_payload = (cfg.FIXTURES_DIR / "clients-before.csv").read_bytes()
@@ -876,13 +922,30 @@ def create_test_job(body: TestJobBody, db: Session = Depends(get_db)):
     job.report_sha256 = report["report_sha256"]
     if report["status"] == "passed":
         art.status = "test_passed"
-        db.commit()
+    else:
+        art.status = "awaiting_test_approval"
     db.commit()
     audit_mod.append(db, "test.completed", {"job_id": job.id, "artifact_id": art.id,
                                             "status": job.status,
                                             "policy_sha256": report["policy_sha256"]})
     db.commit()
     return {"job_id": job.id, "status": job.status, "report": report}
+
+
+@app.get("/api/test-jobs/{job_id}", dependencies=[Depends(require_tester)])
+def get_test_job(job_id: str, db: Session = Depends(get_db)):
+    from backend.models import TestJob
+    job = db.get(TestJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"error": "job not found"})
+    return {
+        "job_id": job.id,
+        "artifact_id": job.artifact_id,
+        "status": job.status,
+        "fixture_name": job.fixture_name,
+        "report": json.loads(job.report_json or "{}"),
+        "created_at": job.created_at,
+    }
 
 
 def _expected_outputs(rows_list: list[dict], plan: dict, id_field: str) -> list[dict]:
@@ -1151,7 +1214,8 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
         try:
             if ntype == "file.read_table":
                 alias = params_n.get("alias", alias)
-                table = rows.read_table(alias, filename)
+                fn = params_n.get("filename", filename)
+                table = rows.read_table(alias, fn)
                 detail = {"rows": len(table)}
             elif ntype == "data.filter":
                 where = params_n.get("where", "True")
@@ -1173,6 +1237,7 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
                 field = field.strip()
                 new_value = literal.strip().strip("\"'")
                 key_field = params_n.get("key_field", plan.get("client_id_field", "ClientID"))
+                fn = params_n.get("filename", filename)
                 if dry_run:
                     would_update.extend(str(r.get(key_field)) for r in table if r.get(key_field) is not None)
                     detail = {"dry_run": True, "would_update": would_update}
@@ -1182,7 +1247,7 @@ def _exec_graph(db: Session, run: Run, graph: dict, plan: dict,
                         if kv is None:
                             continue
                         res = rows.update_row_field(
-                            db, run_id=run.id, alias=alias, filename=filename,
+                            db, run_id=run.id, alias=alias, filename=fn,
                             key_field=key_field, key_value=str(kv), field=field,
                             new_value=new_value, purpose=purpose, effect_ns=run_date)
                         (skipped if res.get("skipped") else updated).append(str(kv))
