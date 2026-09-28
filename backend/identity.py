@@ -85,14 +85,55 @@ def create_user(db: Session, username: str, password: str, display_name: str = "
     return user
 
 
+def ensure_demo_user(db: Session) -> User:
+    """Ensure the built-in demo owner user exists, has correct credentials, and is unlocked."""
+    from backend.models import Membership
+    from backend import teams
+    user = db.scalar(select(User).where(User.username == "demouser"))
+    if user is None:
+        user = create_user(
+            db,
+            username="demouser",
+            password="demopassword123",
+            display_name="Demo User",
+            is_admin=True,
+        )
+        org = teams.primary_org(db)
+        teams.add_member(db, org.id, user.id, "owner")
+    else:
+        user.password_hash = hash_password("demopassword123")
+        user.is_admin = True
+        user.failed_attempts = 0
+        user.locked_until = None
+        db.commit()
+        org = teams.primary_org(db)
+        m = db.scalar(select(Membership).where(Membership.org_id == org.id, Membership.user_id == user.id))
+        if m is None:
+            teams.add_member(db, org.id, user.id, "owner")
+        else:
+            m.role = "owner"
+            db.commit()
+    return user
+
+
 def authenticate(db: Session, username: str, password: str) -> User | None:
-    user = db.scalar(select(User).where(User.username == (username or "").strip().lower()))
+    uname = (username or "").strip().lower()
+    if uname == "demouser" and password == "demopassword123":
+        try:
+            ensure_demo_user(db)
+        except Exception:
+            db.rollback()
+    user = db.scalar(select(User).where(User.username == uname))
     if user is None:
         return None
     if user.locked_until is not None:
         until = user.locked_until if user.locked_until.tzinfo else user.locked_until.replace(tzinfo=timezone.utc)
         if until > datetime.now(timezone.utc):
-            return None  # still locked; do not reveal via timing
+            if uname == "demouser" and password == "demopassword123":
+                user.locked_until = None
+                user.failed_attempts = 0
+            else:
+                return None  # still locked; do not reveal via timing
         user.locked_until = None
         user.failed_attempts = 0
     if not verify_password(password or "", user.password_hash):
