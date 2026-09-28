@@ -267,10 +267,16 @@ export function CreateAutomation({ setPage }) {
               </div>
               <div className="monitor-actions">
                 {!monitoring
-                  ? <button className="btn-primary" onClick={() => { setMonitoring(true); if (!connected) pushLine('warn', 'worker offline — polls will fail honestly'); }}><Icon d={ICONS.eye} size={16} /> Start monitoring</button>
+                  ? <button className="btn-primary" onClick={() => { setMonitoring(true); if (!connected) pushLine('warn', 'worker offline — polls will fail honestly'); }}><Icon d={ICONS.eye} size={16} /> Start Capture</button>
                   : <button className="btn-dark" onClick={() => setMonitoring(false)}>Pause capture</button>}
               </div>
             </div>
+            {!monitoring && (
+              <div className="info-banner" style={{ margin: '10px 0 16px', alignItems: 'center' }}>
+                <Icon d={ICONS.eye} size={18} style={{ flexShrink: 0 }} />
+                <span>Click the <b>"Start Capture"</b> button above to proceed with real-time event observation.</span>
+              </div>
+            )}
             <div className="stat-pair" style={{ marginBottom: 14 }}>
               <div className="stat-box"><div className="stat-val">{eventCount}</div><div className="stat-lbl">Events accepted</div></div>
               <div className="stat-box"><div className="stat-val">{realCands.length}</div><div className="stat-lbl">Real candidates</div></div>
@@ -396,10 +402,19 @@ export function CreateAutomation({ setPage }) {
               <div className="publish-stat"><span>Activated code</span><b>{artifact ? `${artifact.code_sha256.slice(0, 10)}…` : '—'}</b></div>
               <div className="publish-stat"><span>Workflow</span><b>{bound ? `${bound.workflow_id} v${bound.version}` : 'not bound'}</b></div>
             </div>
+            <div className="info-banner" style={{ margin: '14px 0', alignItems: 'center' }}>
+              <Icon d={ICONS.eye} size={18} style={{ flexShrink: 0 }} />
+              <span>
+                To proceed with your automation, click the <b>"Start Capture"</b> button below to begin observing workflow activity.
+              </span>
+            </div>
             <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
               <button className="btn-primary" disabled={busy || !!bound || !catalog || !canPlan}
                       onClick={bind}>
                 <Icon d={ICONS.check} size={16} /> {bound ? 'Workflow bound' : 'Create workflow'}
+              </button>
+              <button className="btn-outline" onClick={() => { setStep(2); setMonitoring(true); }}>
+                <Icon d={ICONS.eye} size={16} /> Start Capture
               </button>
               <button className="btn-outline" disabled={!bound || busy || published || !canPublish}
                       title={canPublish ? '' : 'publishing requires the owner role'} onClick={publish}>
