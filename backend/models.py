@@ -303,18 +303,47 @@ class Invitation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ChangeRequest(Base):
+    """GitHub-PR-style change request (redesigned role model).
+
+    Operators (and observers only if explicitly allowed) propose NEW workflows
+    or EDITS to live ones; the proposal is stored here as an open change
+    request — never applied directly. An owner/admin reviews it: approve+merge
+    applies the payload to the live definition (normal sandbox/activation
+    gates still apply downstream), reject/request-changes records the note.
+    Payload is a JSON snapshot: kind (workflow_create | workflow_edit),
+    summary, plan snapshot, target workflow, requested tools/connectors,
+    and the extended create context.
+    """
+    __tablename__ = "change_requests"
+    id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    author_id: Mapped[str] = mapped_column(String(24), ForeignKey("users.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # workflow_create|workflow_edit
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    summary: Mapped[str] = mapped_column(String(2000), nullable=False, default="")
+    target_workflow_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", index=True)  # open|merged|rejected
+    review_note: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    reviewed_by: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class RoleRequest(Base):
     """Signup role request: a PENDING elevation request only — never a grant.
 
     A new account may ask for a role in the workspace org (requested_role);
-    only an OWNER can approve it via /team/role-requests. There is deliberately
-    no path where the requester's role changes without an owner decision,
-    and 'owner' is refused outright at request time (no self-elevation).
+    only an OWNER or ADMIN can approve it via /team/role-requests. There is
+    deliberately no path where the requester's role changes without such a
+    decision, and 'owner' is refused outright at request time (no
+    self-elevation).
     """
     __tablename__ = "role_requests"
     id: Mapped[str] = mapped_column(String(24), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(24), ForeignKey("users.id"), nullable=False)
-    requested_role: Mapped[str] = mapped_column(String(24), nullable=False)  # observer|operator|approver
+    requested_role: Mapped[str] = mapped_column(String(24), nullable=False)  # observer|operator|approver|admin
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending|approved|rejected
     note: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     decided_by: Mapped[str | None] = mapped_column(String(24), nullable=True)

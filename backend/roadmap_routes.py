@@ -11,6 +11,7 @@ import json
 import os
 import secrets
 import time
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -21,9 +22,9 @@ from sqlalchemy.orm import Session
 from backend import entitlements, identity, orchestration, teams
 from backend.engine.catalog import CATALOG
 from backend.db import SessionLocal
-from backend.models import (Approval, AuditEntry, Draft, Membership, Org, Process,
+from backend.models import (Approval, AuditEntry, ChangeRequest, Draft, Membership, Org, Process,
                             RegistryEvent, RegistryImport, RoleRequest, Run,
-                            Setting, User, WorkflowVersion)
+                            Setting, User, Workflow, WorkflowVersion)
 from backend.security import audit as audit_mod
 from backend.security.tokens import get_expected_token, require_writer
 
@@ -102,21 +103,25 @@ def require_principal(request: Request, db: Session = Depends(get_db)) -> _Princ
 
 
 def admin_guard(principal: _Principal = Depends(require_principal)) -> _Principal:
-    if not principal.is_admin:
-        raise HTTPException(status_code=403, detail={"error": "administrator role required"})
-    return principal
+    """Day-to-day governance gate (was machine-admin-only): owner OR admin
+    passes, as does a true machine admin (is_admin flag) and the service
+    principal. Used for member/process administration."""
+    if principal.is_admin or principal.role in ("admin", "owner"):
+        return principal
+    raise HTTPException(status_code=403, detail={"error": "administrator role required",
+                                                 "how_to_unlock": "owner or admin role"})
 
 
 def owner_guard(principal: _Principal = Depends(require_principal)) -> _Principal:
-    """Organization-owner gate for MEMBER/tier administration. Deliberately
-    stricter than admin_guard: a machine admin flag alone (or the operator
-    fallback) must never allow role changes over other people's workspaces.
+    """Org-lifecycle gate: the OWNER (of the caller's workspace) only — tier
+    changes, plan conversion, org destruction. Admins are co-equal for
+    everything else but not for billing/tier: use admin_guard there.
     The service principal keeps owner-equivalent rights for QA/ops tooling."""
     if principal.kind == "service" or principal.role == "owner":
         return principal
     raise HTTPException(status_code=403, detail={"error": "organization owner role required",
-                                                 "how_to_unlock": "an owner must change roles, "
-                                                 "approve role requests, or convert the plan"})
+                                                 "how_to_unlock": "an owner must change tiers, "
+                                                 "convert the plan, or approve admin role requests"})
 
 
 # ── Phase A: identity ────────────────────────────────────────────────────────
@@ -142,7 +147,7 @@ class TokenIssueBody(BaseModel):
     name: str = "default"
 
 
-VALID_REQUESTED_ROLES = ("observer", "operator", "approver")
+VALID_REQUESTED_ROLES = ("observer", "operator", "approver", "admin")
 
 
 @router.post("/auth/register")
@@ -340,16 +345,36 @@ def node_catalog():
     }
 
 
+# Tool/node categories and trigger options for the expanded Create context step.
+# These map onto real catalog nodes — nothing the executor refuses is offered.
+TOOL_CATEGORIES = (
+    {"id": "files", "label": "Files (read, copy, archive — allowlisted aliases)"},
+    {"id": "data", "label": "Data / rows (filter, transform, aggregate, update)"},
+    {"id": "http", "label": "HTTP (allowlisted hosts only)"},
+    {"id": "notify", "label": "Notify & drafts (in-app, desktop — never auto-send)"},
+    {"id": "logic", "label": "Logic (branch/switch, merge, wait, approval gate)"},
+)
+TRIGGER_OPTIONS = (
+    {"id": "manual", "label": "Manual / Run now", "status": "supported"},
+    {"id": "schedule", "label": "Schedule (evidence-gated)", "status": "supported"},
+    {"id": "file", "label": "File arrival (watched alias settles)", "status": "supported"},
+    {"id": "webhook", "label": "Webhook (secret-header POST)", "status": "supported"},
+)
+
+
 @router.get("/org/catalog")
 def org_catalog():
-    """Organization types, per-type sizes, departments, and per-department
-    process types. Public (no auth): the create wizard needs it pre-login too."""
+    """Organization types, per-type sizes, departments, per-department process
+    types, plus the create-wizard tool/trigger menus. Public (no auth): the
+    create wizard needs it pre-login too."""
     return {
         "org_types": list(teams.ORG_TYPES),
         "sizes_for_type": {k: list(v) for k, v in teams.ORG_SIZES_FOR_TYPE.items()},
         "departments": {k: list(v) for k, v in teams.DEPARTMENTS.items()},
         "process_types": {k: list(v) for k, v in teams.PROCESS_TYPES.items()},
         "default_process_types": list(teams._DEFAULT_PROCESS_TYPES),
+        "tool_categories": TOOL_CATEGORIES,
+        "trigger_options": TRIGGER_OPTIONS,
         "labels": {
             "org_type": {t: t.replace("_", " ").title() for t in teams.ORG_TYPES},
             "size": {s: {"solo": "Solo", "small": "Small", "medium": "Medium",
@@ -595,7 +620,8 @@ def role_requests_list(request: Request, db: Session = Depends(get_db)):
     # workspace's owner (and the service principal). A personal-org owner sees
     # only their OWN requests — never another workspace's queue.
     shared_id = teams.primary_org(db).id
-    is_shared_owner = (principal.kind == "user" and principal.role == "owner"
+    is_shared_owner = (principal.kind == "user"
+                       and principal.role in ("owner", "admin")
                        and principal._org is not None and principal._org.id == shared_id)
     can_decide_all = principal.kind == "service" or is_shared_owner
     if can_decide_all:
@@ -644,8 +670,9 @@ def role_request_decide(request_id: str, body: DecisionBody,
                 break
         if org is None:
             org = teams.primary_org(db)
-        # The deciding owner must own the TARGET workspace: a personal-org owner
-        # cannot approve requests aimed at the shared workspace (or vice versa).
+        # The deciding owner/admin must belong to the TARGET workspace: a
+        # personal-org owner cannot approve requests aimed at the shared
+        # workspace (or vice versa).
         if principal.kind == "user" and (principal._org is None or principal._org.id != org.id):
             raise HTTPException(status_code=403, detail={
                 "error": "role request targets a different workspace",
@@ -685,6 +712,143 @@ def org_convert_to_team(body: ConvertBody, principal: _Principal = Depends(requi
     return {"org": {"id": org.id, "name": org.name, "tier": org.tier},
             "capabilities": caps,
             "note": f"converted from {before} to team; you remain the owner — invite members next"}
+
+
+# ── GitHub-PR-style change requests (role redesign) ──────────────────────────
+
+class ChangeRequestBody(BaseModel):
+    kind: str = "workflow_create"                     # workflow_create | workflow_edit
+    title: str
+    summary: str = ""
+    target_workflow_id: str | None = None
+    payload: dict = {}                                # plan/context/tools snapshot
+
+
+class ChangeRequestDecision(BaseModel):
+    approve: bool
+    note: str = ""
+
+
+def _reviewer_guard(principal: _Principal):
+    """Owner or Admin (or service) may review/merge change requests."""
+    if principal.kind == "service" or principal.role in ("owner", "admin"):
+        return
+    raise HTTPException(status_code=403, detail={
+        "error": "change-request review requires the owner or admin role",
+        "how_to_unlock": "an owner/admin must approve or reject the request"})
+
+
+@router.get("/change-requests", dependencies=[Depends(require_principal)])
+def change_requests_list(request: Request, db: Session = Depends(get_db)):
+    """Owner/admin see the full review queue for their workspace; authors see
+    their own requests (open + decided)."""
+    from backend.models import ChangeRequest, User
+    principal = require_principal(request, db)
+    org = principal._org or teams.primary_org(db)
+    q = db.query(ChangeRequest).filter(ChangeRequest.org_id == org.id) \
+        .order_by(ChangeRequest.created_at.desc())
+    if not (principal.kind == "service" or principal.role in ("owner", "admin")):
+        q = q.filter(ChangeRequest.author_id == (principal.user.id if principal.user else ""))
+    out = []
+    for cr in q.limit(100).all():
+        author = db.get(User, cr.author_id)
+        out.append({"id": cr.id, "kind": cr.kind, "title": cr.title,
+                    "summary": cr.summary, "status": cr.status,
+                    "target_workflow_id": cr.target_workflow_id,
+                    "author": author.username if author else "(deleted)",
+                    "review_note": cr.review_note, "reviewed_by": cr.reviewed_by,
+                    "created_at": cr.created_at.isoformat() if cr.created_at else None})
+    return {"change_requests": out}
+
+
+@router.post("/change-requests", dependencies=[Depends(require_principal)])
+def change_request_open(body: ChangeRequestBody, request: Request,
+                        db: Session = Depends(get_db)):
+    """Open a change request (PR-style proposal). Authors below admin rank get
+    here instead of direct live writes; owner/admin submissions are applied
+    directly upstream and never need this route."""
+    from backend.models import ChangeRequest
+    import secrets as _secrets
+    principal = require_principal(request, db)
+    if principal.kind == "service":
+        raise HTTPException(status_code=400, detail={"error": "open change requests with a user token"})
+    # Observer default is VIEW ONLY: no proposals, no writes (the product rule).
+    if principal.role == "observer":
+        raise HTTPException(status_code=403, detail={
+            "error": "observers have view-only access and cannot open change requests",
+            "how_to_unlock": "operator role or higher"})
+    if body.kind not in ("workflow_create", "workflow_edit"):
+        raise HTTPException(status_code=422, detail={"error": f"unknown change-request kind: {body.kind}"})
+    if not body.title.strip():
+        raise HTTPException(status_code=422, detail={"error": "change request needs a title"})
+    if body.kind == "workflow_edit" and not body.target_workflow_id:
+        raise HTTPException(status_code=422, detail={"error": "workflow_edit needs target_workflow_id"})
+    if principal.role in ("owner", "admin"):
+        raise HTTPException(status_code=409, detail={
+            "error": "owners and admins apply changes directly; no change request needed",
+            "how_to_unlock": "submit the create/edit call directly"})
+    cr = ChangeRequest(id=_secrets.token_hex(12),
+                       org_id=(principal._org.id if principal._org else teams.primary_org(db).id),
+                       author_id=principal.user.id, kind=body.kind,
+                       title=body.title.strip()[:200], summary=body.summary[:2000],
+                       target_workflow_id=body.target_workflow_id,
+                       payload_json=json.dumps(body.payload, default=str),
+                       status="open", created_at=datetime.now(timezone.utc))
+    db.add(cr)
+    who = principal.user.username
+    audit_mod.append(db, "change_request.opened", {
+        "request_id": cr.id, "kind": cr.kind, "title": cr.title,
+        "author": who, "target_workflow_id": cr.target_workflow_id})
+    db.commit()
+    return {"id": cr.id, "status": cr.status,
+            "note": "stored as an open change request — an owner/admin must review and merge it"}
+
+
+@router.post("/change-requests/{request_id}/decide", dependencies=[Depends(require_principal)])
+def change_request_decide(request_id: str, body: ChangeRequestDecision,
+                          request: Request, db: Session = Depends(get_db)):
+    """Owner/admin decision. approve+merge marks the proposal accepted and — for
+    workflow_create with a complete plan snapshot — creates the live workflow
+    row in a DRAFT state; the normal sandbox → activation gates still govern
+    its go-live. Reject records the note. Everything is audited."""
+    from backend.models import ChangeRequest, User
+    principal = require_principal(request, db)
+    _reviewer_guard(principal)
+    cr = db.get(ChangeRequest, request_id)
+    if cr is None:
+        raise HTTPException(status_code=404, detail={"error": "change request not found"})
+    if cr.status != "open":
+        raise HTTPException(status_code=409, detail={"error": f"change request already {cr.status}"})
+    who = principal.user.username if principal.user else "service"
+    cr.status = "merged" if body.approve else "rejected"
+    cr.review_note = body.note[:500]
+    cr.reviewed_by = who
+    cr.reviewed_at = datetime.now(timezone.utc)
+    merged_workflow_id = None
+    if body.approve and cr.kind == "workflow_create":
+        # Materialize the proposal as a DRAFT workflow: version 0, no activated
+        # code — the reviewer then runs the normal generate → test → activate
+        # chain (never bypassed by the merge).
+        try:
+            payload = json.loads(cr.payload_json) if cr.payload_json else {}
+        except Exception:
+            payload = {}
+        wf_id = f"wf-cr-{cr.id[:8]}"
+        if db.get(Workflow, wf_id) is None:
+            db.add(Workflow(id=wf_id, name=cr.title[:200], demo=False))
+            from backend.models import WorkflowVersion
+            db.add(WorkflowVersion(id=str(uuid.uuid4()), workflow_id=wf_id, version=0,
+                                   graph_json=json.dumps({"graph": {"nodes": [], "edges": []}}),
+                                   artifact_sha256="0" * 64,
+                                   changelog=f"merged from change request {cr.id} (draft)"))
+            merged_workflow_id = wf_id
+    audit_mod.append(db, "change_request.decided", {
+        "request_id": cr.id, "approved": body.approve, "merged_workflow_id": merged_workflow_id,
+        "decided_by": who, "note": body.note[:200]})
+    db.commit()
+    return {"id": cr.id, "status": cr.status, "merged_workflow_id": merged_workflow_id,
+            "note": ("merged: the proposal is materialized as a draft workflow; normal sandbox/activation gates still apply"
+                     if body.approve else "rejected — the author can revise and resubmit")}
 
 
 @router.get("/processes", dependencies=[Depends(require_principal)])

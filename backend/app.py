@@ -14,7 +14,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -74,6 +74,12 @@ with db_engine.begin() as _conn:
     _wfcols = {row[1] for row in _conn.execute(_sqltext("PRAGMA table_info(workflows)"))}
     if "http_allow_hosts_json" not in _wfcols:
         _conn.execute(_sqltext("ALTER TABLE workflows ADD COLUMN http_allow_hosts_json TEXT NOT NULL DEFAULT '[]'"))
+
+# PR-style change requests (role redesign): create_all makes the table for new
+# DBs; create it explicitly here anyway so pre-existing databases are covered
+# idempotently (checkfirst=True is a no-op when the table already exists).
+from backend.models import ChangeRequest as _ChangeRequest  # noqa: E402
+_ChangeRequest.__table__.create(bind=db_engine, checkfirst=True)
 
 app = FastAPI(title="AutoStack spike worker", version="0.1.0")
 app.include_router(roadmap_router)
@@ -284,6 +290,28 @@ def start_run(body: RunBody, db: Session = Depends(get_db)):
     if isinstance(version_payload, dict) and "nodes" in version_payload:
         return _start_run_graph(db, version, version_payload, body)
     return _start_run_legacy(db, version, body)
+
+
+def _caller_role_for_gates(db: Session, request) -> str:
+    """Effective role for the redesigned RBAC gates on legacy app.py routes.
+    Mirrors the roadmap principal logic: service token → 'service'; otherwise
+    teams.effective_role (caller-org aware, so personal-org owners resolve as
+    owners — the owner/tools access bug fix)."""
+    auth = request.headers.get("Authorization", "") if request is not None else ""
+    presented = auth[7:].strip() if auth.startswith("Bearer ") else ""
+    # Look the expected token up on the module (not a from-import binding) so
+    # runtime monkeypatching (tests, QA) is honored exactly as for other guards.
+    from backend.security import tokens as _tokens_mod
+    if presented and presented == _tokens_mod.get_expected_token():
+        return "service"
+    if not presented:
+        return "observer"
+    from backend import identity as _ident
+    user = _ident.user_for_token(db, presented)
+    if user is None:
+        return "observer"
+    from backend import teams as _teams
+    return _teams.effective_role(db, user)
 
 
 def _is_client_error(exc: BaseException) -> bool:
@@ -1635,18 +1663,27 @@ def _plan_summary(plan: dict) -> str:
 
 
 class ContextBody(BaseModel):
-    """Create step 1 classification (product §5): org type/size, department,
-    process type. All fields optional so an empty body = legacy no-context
-    bind; a partially-filled body is validated as a whole."""
+    """Create step 1 classification (product §5, expanded): org type/size,
+    department, process type, plus the extended context subsections — chosen
+    connectors, tool/node categories, trigger preference, a free-text
+    sensitivity/compliance note, and the target outcome. Core tuple fields are
+    optional so an empty body = legacy no-context bind; a partially-filled
+    body is validated as a whole. Extended fields are stored verbatim with the
+    plan/workflow (never invented metrics)."""
     org_type: str = ""
     size: str = ""
     department: str = ""
     process_type: str = ""
+    connectors: list[str] = []
+    tools: list[str] = []
+    trigger: str = ""
+    sensitivity_note: str = ""
+    outcome: str = ""
 
 
 @app.post("/api/plan/{plan_id}/create-workflow", dependencies=[Depends(require_writer)])
 def create_workflow_from_plan(plan_id: str, body: ContextBody | None = None,
-                              db: Session = Depends(get_db)):
+                              request: Request = None, db: Session = Depends(get_db)):
     """Bind an activated generated artifact to a real versioned workflow (Phase 5->9).
 
     The version records graph + plan hash + activated code hash together, so the
@@ -1671,6 +1708,14 @@ def create_workflow_from_plan(plan_id: str, body: ContextBody | None = None,
             raise HTTPException(status_code=422, detail={"error": "; ".join(problems)})
     else:
         ctx = None
+    # Role redesign: owners/admins apply changes directly; operators (and
+    # observers, who cannot even propose by default) must go through the
+    # change-request flow — a direct create attempt is refused with the path.
+    if _caller_role_for_gates(db, request) not in ("owner", "admin", "service"):
+        raise HTTPException(status_code=403, detail={
+            "error": "creating live workflows requires the owner or admin role",
+            "how_to_unlock": "open a change request instead (POST /api/change-requests); "
+                            "an owner/admin will review and merge it"})
     plan = json.loads(plan_row.plan_json)
     art = (db.query(GeneratedArtifact)
            .filter(GeneratedArtifact.plan_id == plan_id,
@@ -1705,7 +1750,8 @@ def create_workflow_from_plan(plan_id: str, body: ContextBody | None = None,
     plan_row.status = "bound_to_workflow"
     if ctx is not None:
         teams.set_workflow_context(db, wf_id, ctx["org_type"], ctx["size"],
-                                   ctx["department"], ctx["process_type"])
+                                   ctx["department"], ctx["process_type"],
+                                   extra=ctx)
     db.commit()
     audit_mod.append(db, "workflow.from_plan",
                      {"plan_id": plan_id, "workflow_id": wf_id, "version": vnext,

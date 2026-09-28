@@ -213,7 +213,56 @@ export function Profile({ identity }) {
 
 // ── Teams ─────────────────────────────────────────────────────────────────────
 
-const ROLES = ['observer', 'operator', 'approver', 'owner'];
+const ROLES = ['observer', 'operator', 'approver', 'admin', 'owner'];
+
+function ChangeRequestsCard({ identity, onDecided }) {
+  // PR-style review queue: owner/admin see the full queue and decide; others
+  // (authors) see their own requests with their status.
+  const isReviewer = identity && (identity.role === 'owner' || identity.role === 'admin');
+  const [items, setItems] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    try { setItems(await api.changeRequests().catch(() => ({ change_requests: [] }))); }
+    catch (e) { setErr(e.message); }
+  }
+  useState(() => { refresh(); });
+
+  async function decide(id, approve) {
+    setBusy(true); setErr(null);
+    try { await api.decideChangeRequest(id, approve); await refresh(); if (onDecided) onDecided(); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Card title="Change requests (proposed automations)">
+      <p className="muted small">
+        Operators propose new automations or edits; they never touch the live set directly.
+        {isReviewer ? ' As an owner/admin you review and merge or reject them here.' : ' An owner/admin reviews and merges them.'}
+      </p>
+      {err && <div className="error">{err}</div>}
+      {items && items.change_requests.map(cr => (
+        <Row key={cr.id}>
+          <div><strong>{cr.title}</strong> <span className="muted">({cr.kind.replace('_', ' ')} · by {cr.author})</span>
+            {cr.summary && <div className="muted small">{cr.summary}</div>}
+          </div>
+          <div>
+            {cr.status === 'open' && isReviewer ? (
+              <>
+                <button className="link" disabled={busy} onClick={() => decide(cr.id, true)}>approve &amp; merge</button>
+                <button className="link danger" disabled={busy} onClick={() => decide(cr.id, false)}>reject</button>
+              </>
+            ) : <span className="muted small">{cr.status}{cr.reviewed_by ? ` by ${cr.reviewed_by}` : ''}{cr.review_note ? ` — ${cr.review_note}` : ''}</span>}
+          </div>
+        </Row>
+      ))}
+      {items && items.change_requests.length === 0 && <p className="muted">No change requests yet.</p>}
+    </Card>
+  );
+}
+
 
 export function Teams({ identity }) {
   const isOwner = !!(identity && identity.role === 'owner');
@@ -298,6 +347,8 @@ export function Teams({ identity }) {
         {requests && requests.role_requests.length === 0 && <p className="muted">No role requests.</p>}
         {!isOwner && <p className="muted">Only an owner can approve or reject role requests.</p>}
       </Card>
+
+      <ChangeRequestsCard identity={identity} onDecided={refresh} />
 
       <Card title="Invite a teammate">
         {isOwner && members?.org?.tier === 'solo' ? (
@@ -420,7 +471,7 @@ export function Runners({ identity }) {
 export function Scheduling({ identity }) {
   // Triggers are workflows-management: operator+ can create/enable/disable
   // (backend requires "run"); the old owner-only gate falsely blocked operators.
-  const rank = { observer: 0, operator: 1, approver: 2, owner: 3 }[identity && identity.role] ?? -1;
+  const rank = { observer: 0, operator: 1, approver: 2, admin: 3, owner: 4 }[identity && identity.role] ?? -1;
   const canManage = rank >= 1;
   const [wfs, setWfs] = useState(null);
   const [triggers, setTriggers] = useState(null);

@@ -97,8 +97,9 @@ def test_bind_without_activation_refused_reproducing_screenshot(owner_h):
     art_id = r_gen.json()["artifact_id"]
     assert r_gen.json()["status"] == "awaiting_test_approval"
 
-    # 3. Attempt to bind directly before sandbox test and activation
-    r_bind = client.post(f"/api/plan/{plan_id}/create-workflow", json=CTX, headers=op_h)
+    # 3. Attempt to bind directly before sandbox test and activation (the
+    # owner binds — operators route through change requests in the new RBAC)
+    r_bind = client.post(f"/api/plan/{plan_id}/create-workflow", json=CTX, headers=owner_h)
     assert r_bind.status_code == 409
     assert r_bind.json()["detail"]["error"] == "no activated artifact for this plan"
 
@@ -170,8 +171,8 @@ def test_sandbox_test_retry_and_activation_lifecycle(owner_h):
     assert r_test_post_act.status_code == 409
     assert "already activated" in r_test_post_act.json()["detail"]["error"]
 
-    # 8. Post-activation binding succeeds
-    r_bind = client.post(f"/api/plan/{plan_id}/create-workflow", json=CTX, headers=appr_h)
+    # 8. Post-activation binding succeeds (owner binds; the approver activated)
+    r_bind = client.post(f"/api/plan/{plan_id}/create-workflow", json=CTX, headers=owner_h)
     assert r_bind.status_code == 200
     assert r_bind.json()["workflow_id"].startswith("wf-")
 

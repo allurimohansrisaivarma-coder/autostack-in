@@ -36,14 +36,23 @@ export function CreateAutomation({ setPage }) {
 
   // Step 1 context (org type → size → department → process type), from the
   // worker's catalog — never a hardcoded UI list. "Other" is free text.
+  // Expanded subsections: connectors, tool categories, trigger preference,
+  // sensitivity note, target outcome (all stored with the workflow context).
   const [catalog, setCatalog] = useState(null);
   const [ctxOrgType, setCtxOrgType] = useState('corporate');
   const [ctxSize, setCtxSize] = useState('medium');
   const [ctxDept, setCtxDept] = useState('finance');
   const [ctxProcess, setCtxProcess] = useState('accounts_payable');
   const [ctxOther, setCtxOther] = useState('');
+  const [ctxConnectors, setCtxConnectors] = useState([]);
+  const [ctxTools, setCtxTools] = useState([]);
+  const [ctxTrigger, setCtxTrigger] = useState('manual');
+  const [ctxSensitivity, setCtxSensitivity] = useState('');
+  const [ctxOutcome, setCtxOutcome] = useState('');
+  const [connectors, setConnectors] = useState(null);
   const [nodes, setNodes] = useState(null);
   useEffect(() => { api.orgCatalog().then(setCatalog).catch(() => setCatalog(null)); }, []);
+  useEffect(() => { api.connectors().then(setConnectors).catch(() => setConnectors(null)); }, []);
   // Node catalog: the worker's own validated node set — drives the capability
   // chips in step 4 so the UI can never advertise a node the executor refuses.
   useEffect(() => { api.nodeCatalog().then(setNodes).catch(() => setNodes(null)); }, []);
@@ -149,17 +158,38 @@ export function CreateAutomation({ setPage }) {
     return a;
   }, 'human activation approval recorded');
 
+  const buildContext = () => ({
+    org_type: ctxOrgType,
+    size: ctxSize,
+    department: ctxDept,
+    process_type: ctxOther.trim() ? ctxOther.trim().toLowerCase().replace(/\s+/g, '_') : ctxProcess,
+    connectors: ctxConnectors,
+    tools: ctxTools,
+    trigger: ctxTrigger,
+    sensitivity_note: ctxSensitivity.trim(),
+    outcome: ctxOutcome.trim(),
+  });
+
   const bind = () => gate(async () => {
-    const context = {
-      org_type: ctxOrgType,
-      size: ctxSize,
-      department: ctxDept,
-      process_type: ctxOther.trim() ? ctxOther.trim().toLowerCase().replace(/\s+/g, '_') : ctxProcess,
-    };
-    const b = await api.createWorkflowFromPlan(planId, context);
+    const b = await api.createWorkflowFromPlan(planId, buildContext());
     setBound(b);
     return b;
   }, b => `workflow ${b.workflow_id} v${b.version} bound to plan + activated code`);
+
+  // Operators (and below) cannot create live workflows: their work is proposed
+  // as a change request for an owner/admin to review and merge (PR-style).
+  const submitChangeRequest = () => gate(async () => {
+    const ctx = buildContext();
+    const res = await api.openChangeRequest({
+      kind: 'workflow_create',
+      title: ctxOther.trim() ? ctxOther.trim() : `Client follow-up (${ctx.department})`,
+      summary: ctx.outcome || 'submitted from the Create Automation flow',
+      target_workflow_id: null,
+      payload: { plan_id: planId, ...ctx },
+    });
+    setBound({ change_request: res.id, status: res.status });
+    return res;
+  }, r => `change request ${r.id} opened — an owner/admin will review it`);
 
   const publish = () => gate(async () => {
     if (!bound) throw new Error('bind the workflow first');
@@ -178,10 +208,14 @@ export function CreateAutomation({ setPage }) {
   // bind button checks server state (activation), not local session state, so
   // an operator can bind after an approver activates — the real team flow.
   const role = (live && live.me && live.me.role) || null;
-  const rank = { observer: 0, operator: 1, approver: 2, owner: 3 }[role] ?? null;
+  // Redesigned RBAC: owner/admin co-equal; operator proposes via change
+  // requests; approver tests/activates. The backend re-checks every gate.
+  const rank = { observer: 0, operator: 1, approver: 2, admin: 3, owner: 4 }[role] ?? null;
   const canPlan = rank === null || rank >= 1;
   const canApprove = rank === null || rank >= 2;
+  const canBind = rank === null || rank >= 3;   // owner/admin create live workflows
   const canPublish = rank === null || rank >= 3;
+  const isReviewer = rank !== null && rank >= 3;
 
   // Human-readable labels for the context summary chips.
   const ctxLabel = (kind, v) => (catalog && catalog.labels?.[kind]?.[v]) || String(v || '—').replace(/_/g, ' ');
@@ -252,12 +286,63 @@ export function CreateAutomation({ setPage }) {
             ) : (
               <p className="muted">Loading the organization catalog from the worker… (context selectors appear once it loads)</p>
             )}
+
+            {/* ── Expanded context subsections (worker-sourced, honest) ── */}
+            {catalog && (
+              <div className="detail-section" style={{ marginTop: 14 }}>
+                <div className="detail-label">Connectors to use (scopes the tools offered later)</div>
+                {!connectors ? (
+                  <p className="muted">Loading the connectors inventory from the worker…</p>
+                ) : (
+                  <div className="tag-row">
+                    {connectors.connectors.filter(c => c.status === 'supported' || c.status === 'limited').map(c => {
+                      const on = ctxConnectors.includes(c.id);
+                      return (
+                        <button key={c.id} className={`tag ${on ? 'sel' : ''}`} title={`${c.status}: ${c.can_see || c.detail || ''}`}
+                                style={{ cursor: 'pointer', borderColor: on ? '#2563EB' : undefined }}
+                                onClick={() => setCtxConnectors(on ? ctxConnectors.filter(x => x !== c.id) : [...ctxConnectors, c.id])}>
+                          {c.name} · {c.status}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+            {catalog && catalog.tool_categories && (
+              <div className="detail-section" style={{ marginTop: 14 }}>
+                <div className="detail-label">Tool / node categories needed</div>
+                <div className="tag-row">
+                  {catalog.tool_categories.map(t => {
+                    const on = ctxTools.includes(t.id);
+                    return (
+                      <button key={t.id} className={`tag ${on ? 'sel' : ''}`} title={t.label}
+                              style={{ cursor: 'pointer', borderColor: on ? '#2563EB' : undefined }}
+                              onClick={() => setCtxTools(on ? ctxTools.filter(x => x !== t.id) : [...ctxTools, t.id])}>
+                        {t.id}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="form-grid" style={{ marginTop: 14 }}>
-              <label>Data Sensitivity
-                <select defaultValue="Medium"><option>Low</option><option>Medium</option><option>High</option></select>
+              <label>Trigger preference
+                <select value={ctxTrigger} onChange={e => setCtxTrigger(e.target.value)}>
+                  {(catalog?.trigger_options || []).map(t => (
+                    <option key={t.id} value={t.id} disabled={t.status !== 'supported'}>
+                      {t.label}{t.status !== 'supported' ? ' (unavailable)' : ''}
+                    </option>
+                  ))}
+                </select>
               </label>
-              <label>Capture surfaces
-                <select defaultValue="Tracking file (CSV)"><option>Tracking file (CSV)</option><option>Browser (synthetic contract)</option></select>
+              <label>Data sensitivity / compliance note (optional)
+                <input placeholder="e.g. contains client PII — internal only" value={ctxSensitivity}
+                       onChange={e => setCtxSensitivity(e.target.value)} maxLength={200} />
+              </label>
+              <label>Target outcome (what success looks like)
+                <input placeholder="e.g. zero missed follow-ups; drafts ready same day" value={ctxOutcome}
+                       onChange={e => setCtxOutcome(e.target.value)} maxLength={200} />
               </label>
             </div>
             <div className="ctx-summary" style={{ marginTop: 16 }}>
@@ -267,6 +352,10 @@ export function CreateAutomation({ setPage }) {
                 <span className="tag">{ctxLabel('size', ctxSize)}</span>
                 <span className="tag">{ctxLabel('department', ctxDept)}</span>
                 <span className="tag">{ctxOther.trim() ? ctxOther.trim() : ctxLabel('process_type', ctxProcess)}</span>
+                {ctxConnectors.length > 0 && <span className="tag">connectors: {ctxConnectors.join(', ')}</span>}
+                {ctxTools.length > 0 && <span className="tag">tools: {ctxTools.join(', ')}</span>}
+                {ctxTrigger && <span className="tag">trigger: {ctxTrigger}</span>}
+                {ctxSensitivity.trim() && <span className="tag">sensitivity: {ctxSensitivity.trim()}</span>}
               </div>
             </div>
           </div>
@@ -432,23 +521,33 @@ export function CreateAutomation({ setPage }) {
 
         {step === 5 && (
           <div className="step-panel">
-            <h3>Bind the workflow — then publish if you choose</h3>
-            <p>Binding creates a versioned workflow whose hash covers graph + plan + activated code together. Publication is separate consent and shares the schema only.{!approval && ' Binding needs an ACTIVATED artifact — an approver must complete the sandbox test and activation approval first.'}</p>
+            <h3>{canBind ? 'Bind the workflow — then publish if you choose' : 'Submit your automation for review'}</h3>
+            <p>{canBind
+              ? 'Binding creates a versioned workflow whose hash covers graph + plan + activated code together. Publication is separate consent and shares the schema only.'
+              : 'Your role submits a CHANGE REQUEST (like a GitHub PR): an owner or admin reviews it, and after merge the normal sandbox and activation gates still apply. Nothing goes live without approval.'}
+              {!approval && canBind && ' Binding needs an ACTIVATED artifact — an approver must complete the sandbox test and activation approval first.'}</p>
             <div className="publish-box">
               <div className="publish-stat"><span>Plan</span><b>{planId ? `${planId.slice(0, 8)}…` : '—'}</b></div>
               <div className="publish-stat"><span>Activated code</span><b>{artifact ? `${artifact.code_sha256.slice(0, 10)}…` : '—'}</b></div>
-              <div className="publish-stat"><span>Workflow</span><b>{bound ? `${bound.workflow_id} v${bound.version}` : 'not bound'}</b></div>
+              <div className="publish-stat"><span>{canBind ? 'Workflow' : 'Change request'}</span><b>{bound ? (bound.workflow_id ? `${bound.workflow_id} v${bound.version}` : `CR ${bound.change_request} · ${bound.status}`) : 'not submitted'}</b></div>
             </div>
             <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
-              <button className="btn-primary" disabled={busy || !!bound || !catalog || !canPlan}
-                      onClick={bind}>
-                <Icon d={ICONS.check} size={16} /> {bound ? 'Workflow bound' : 'Create workflow'}
-              </button>
-              <button className="btn-outline" disabled={!bound || busy || published || !canPublish}
-                      title={canPublish ? '' : 'publishing requires the owner role'} onClick={publish}>
+              {canBind ? (
+                <button className="btn-primary" disabled={busy || !!bound || !catalog || !canPlan}
+                        onClick={bind}>
+                  <Icon d={ICONS.check} size={16} /> {bound ? 'Workflow bound' : 'Create workflow'}
+                </button>
+              ) : (
+                <button className="btn-primary" disabled={busy || !!bound || !catalog || !canPlan}
+                        onClick={submitChangeRequest}>
+                  <Icon d={ICONS.check} size={16} /> {bound ? 'Change request opened' : 'Submit change request'}
+                </button>
+              )}
+              <button className="btn-outline" disabled={!bound || busy || published || !canBind || bound.change_request}
+                      title={canBind ? '' : 'publishing requires the owner or admin role'} onClick={publish}>
                 {published ? 'Published' : 'Publish to Registry'}
               </button>
-              {bound && <button className="btn-dark" onClick={() => setPage('workflows')}>Go to Workflows <Icon d={ICONS.arrow} size={14} /></button>}
+              {bound && bound.workflow_id && <button className="btn-dark" onClick={() => setPage('workflows')}>Go to Workflows <Icon d={ICONS.arrow} size={14} /></button>}
             </div>
           </div>
         )}

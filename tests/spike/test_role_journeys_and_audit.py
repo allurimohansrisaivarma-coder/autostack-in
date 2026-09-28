@@ -171,8 +171,9 @@ def test_scenario_b_workflow_lifecycle_owner_and_operator(client):
     assert res.status_code == 200
     assert res.json()["status"] == "activated"
 
-    # 5. Bind activated plan to workflow
-    res = client.post(f"/api/plan/{plan_id}/create-workflow", headers=opr_h)
+    # 5. Bind activated plan to workflow (owner/admin act in the redesigned
+    # RBAC — the operator's direct create is refused with the CR path)
+    res = client.post(f"/api/plan/{plan_id}/create-workflow", headers=owner_h)
     assert res.status_code == 200
     wf_data = res.json()
     wf_id = wf_data["workflow_id"]

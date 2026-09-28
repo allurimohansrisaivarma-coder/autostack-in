@@ -129,6 +129,9 @@ def test_registration_grants_operator_and_missing_membership_falls_back(owner_h)
 
 def test_observer_is_read_only_but_operator_runs_and_creates(owner_h):
     op_h = _register("rbac-operator-b")
+    # later signups own personal workspaces now: an operator in the SHARED
+    # workspace is created by explicit owner grant (the affiliation model)
+    _promote(owner_h, "rbac-operator-b", "operator")
 
     # make a real observer: register a user, then the owner demotes them
     obs_h = _register("rbac-observer-b")
@@ -175,13 +178,18 @@ def test_observer_is_read_only_but_operator_runs_and_creates(owner_h):
                     json={"artifact_id": artifact_id, "job_id": job_id}, headers=appr_h)
     assert r.status_code == 200, r.text
 
-    # operator completes creation (post-activation binding is a run-level act)
-    r = client.post(f"/api/plan/{plan_id}/create-workflow", json=CTX, headers=op_h)
+    # workflow creation is an owner/admin act in the redesigned RBAC: the
+    # operator's plan became an approved artifact, the owner binds it live
+    # (the operator path is a change request — covered by its own test)
+    r = client.post(f"/api/plan/{plan_id}/create-workflow", json=CTX, headers=owner_h)
     assert r.status_code == 200, r.text
     wf_id = r.json()["workflow_id"]
+    # and the operator's direct create attempt is refused with the CR path
+    r = client.post(f"/api/plan/{plan_id}/create-workflow", json=CTX, headers=op_h)
+    assert r.status_code == 403 and "change request" in r.json()["detail"]["how_to_unlock"]
 
     # owner-only: publish (operator/approver refused)
-    graph = r.json()["graph"]
+    graph = client.get(f"/api/workflows/{wf_id}", headers=owner_h).json()["graph"]
     pub = {"slug": "rbac-pub-1", "title": "t", "graph": graph,
            "publication_consent": True}
     assert client.post("/api/registry/publish", json=pub, headers=op_h).status_code == 403

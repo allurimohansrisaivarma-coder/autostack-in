@@ -226,7 +226,7 @@ export function Workflows({ setPage, identity }) {
   // Role gating mirrors the worker: writing (run/rollback) needs operator+,
   // deciding a mid-run approval gate needs approver+.
   const role = (identity && identity.role) || (live && live.me && live.me.role) || 'observer';
-  const roleRank = { observer: 0, operator: 1, approver: 2, owner: 3 }[role] ?? 0;
+  const roleRank = { observer: 0, operator: 1, approver: 2, admin: 3, owner: 4 }[role] ?? 0;
   const canWrite = roleRank >= 1;
   const canApprove = roleRank >= 2;
 
@@ -492,7 +492,7 @@ export function Workflows({ setPage, identity }) {
 export function Registry({ identity }) {
   const isOwner = !!(identity && identity.role === 'owner');
   // Imports create untrusted drafts (a write) — observers are read-only.
-  const rank = { observer: 0, operator: 1, approver: 2, owner: 3 }[identity && identity.role] ?? -1;
+  const rank = { observer: 0, operator: 1, approver: 2, admin: 3, owner: 4 }[identity && identity.role] ?? -1;
   const canImport = rank >= 1;
   const [live, setLive] = useState(null);
   const [search, setSearch] = useState('');

@@ -64,7 +64,7 @@ def require_writer(request: Request) -> None:
     from backend import teams
     from backend.db import SessionLocal
     with SessionLocal() as db:
-        role = teams.user_role(db, user)
+        role = teams.effective_role(db, user)
     if not teams.role_allows(role, "run"):
         raise HTTPException(status_code=403, detail={
             "error": f"role '{role}' may not perform this action",
@@ -91,7 +91,7 @@ def _require_permission(request: Request, permission: str) -> None:
     from backend import teams
     from backend.db import SessionLocal
     with SessionLocal() as db:
-        role = teams.user_role(db, user)
+        role = teams.effective_role(db, user)
     if not teams.role_allows(role, permission):
         need = teams.PERMISSION_MIN_ROLE.get(permission, "owner")
         raise HTTPException(status_code=403, detail={
