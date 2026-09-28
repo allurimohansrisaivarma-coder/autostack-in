@@ -10,7 +10,11 @@ import secrets
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = REPO_ROOT / "artifacts" / "spike"
+
+# AUTOSTACK_DATA_DIR overrides the default local path.
+# In container deployments (Railway) set this to a writable path such as /data.
+_env_data = os.environ.get("AUTOSTACK_DATA_DIR", "").strip()
+DATA_DIR: Path = Path(_env_data) if _env_data else REPO_ROOT / "artifacts" / "spike"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "spike.db"

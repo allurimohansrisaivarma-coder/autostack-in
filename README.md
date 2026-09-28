@@ -16,6 +16,20 @@ with exactly-once guarantees — all on your machine.
 
 ---
 
+## Live demo
+
+| Component | URL | Status |
+|-----------|-----|--------|
+| Frontend (Vite + React 19) | [autostack-in.vercel.app](https://autostack-in.vercel.app) | Production (Vercel) |
+| Backend API (FastAPI on Railway) | [autostack-backend-production.up.railway.app](https://autostack-backend-production.up.railway.app) | Production (Railway) |
+| Local Worker (Self-hosted) | `http://127.0.0.1:8747` | Dev / Local-first |
+
+> The production deployment connects the Vercel frontend to the Railway backend with
+> dynamic CORS (`ALLOWED_ORIGINS`) and a persistent data volume. For local development,
+> the frontend auto-detects the local worker at `http://127.0.0.1:8747`.
+
+---
+
 ## Documentation
 
 | Getting started | |
@@ -103,9 +117,11 @@ node desktop/red-embed.js http://127.0.0.1:8747 "$TOK" desktop/spike-flow.json
 cd frontend && npm install && npm run dev               # http://127.0.0.1:5173
 ```
 
-Open `http://127.0.0.1:5173`, register the first user (it becomes the org **owner/admin**),
+Open `http://127.0.0.1:5173`, register the first user (it owns the shared workspace as
+**owner/admin**; later signups get their **own personal workspace** as owner — an
+optional "Requested role" is stored as a pending request for the shared workspace),
 then use **Discovery** → **Create Automation** to go from an event to a tested, approved
-workflow.
+workflow. Copy `.env.example` to `.env` for optional configuration.
 
 ### Smoke-test the whole stack
 
@@ -113,7 +129,7 @@ workflow.
 TOK=$(cat artifacts/spike/token)
 AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/qa_probe.py          # 57 checks
 AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/scenario_battery.py  # 31 checks
-.venv/Scripts/python.exe -m pytest tests/ -q                                 # 132 tests + 29 subtests
+.venv/Scripts/python.exe -m pytest tests/ -q                                 # 164 tests + 29 subtests
 ```
 
 ## Environment variables
@@ -123,6 +139,8 @@ AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/scenario_battery.py  # 3
 | `AUTOSTACK_TOKEN`          | persisted token file     | Service bearer token for the worker API. Env wins; otherwise `artifacts/spike/token` is loaded or created (mode `0600`, gitignored). |
 | `AUTOSTACK_AI_PROVIDER`    | `mock`                   | `mock` (deterministic, offline) or `gemini`.                    |
 | `AUTOSTACK_GEMINI_API_KEY` | unset                    | Required when the provider is `gemini`; without a key the adapter fails closed with `GenerationError`. |
+| `ALLOWED_ORIGINS`          | unset                    | Comma-separated extra CORS origins for the worker API (e.g. the Vercel frontend URL on Railway); `https://*.vercel.app` is always accepted. |
+| `AUTOSTACK_DATA_DIR`       | `artifacts/spike`        | Writable data directory override — set to `/data` in containers (Railway). |
 
 The AI key is read at request time and is never written to the database or logs.
 `artifacts/` (database, token, Node-RED user dir, logs) is fully gitignored.
@@ -403,7 +421,45 @@ backend/           FastAPI worker (app.py, roadmap_routes.py, engine/, security/
 frontend/          React 19 + Vite UI (src/main.jsx shell, theme.js, page modules, tokens in styles.css)
 desktop/           Node-RED embed (red-embed.js, red-embed-core.js) + Electron shell (main.js)
 scripts/           run_worker.py, qa_probe.py (57), scenario_battery.py (31), cleanup_dev_junk.py, measure_budgets.py
-tests/spike/       132 pytest tests + 29 subtests; isolated-DB conftest
+tests/spike/       pytest tests + subtests; isolated-DB conftest
 docs/              contracts, phase-1 plan/status, spike evidence, platform matrix, roadmap, QA report, budgets
+deploy/            Dockerfile.worker (Railway-compatible container build)
 artifacts/spike/   runtime state: spike.db, token, red-userdir, logs (gitignored)
+```
+
+## Deployment
+
+### Frontend on Vercel
+
+The frontend is a static Vite build; `vercel.json` at the repo root (or
+`frontend/vercel.json` when the Vercel project's root directory is `frontend`)
+configures the build. Set `VITE_API_BASE` to the Railway backend URL.
+
+| Setting | Value |
+|---------|-------|
+| Framework Preset | Vite |
+| Root Directory | `frontend` |
+| Build Command | `npm run build` |
+| Output Directory | `dist` |
+| `VITE_API_BASE` | `https://autostack-backend-production.up.railway.app` |
+
+### Backend on Railway (or any container host)
+<arg_value><b88a6f17>`railway.json` builds `deploy/Dockerfile.worker` and health-checks `/api/health`.
+Set the following environment variables on the service:
+
+| Variable | Value |
+|----------|-------|
+| `AUTOSTACK_TOKEN` | a strong random token (otherwise one is generated and persisted to the volume) |
+| `AUTOSTACK_DATA_DIR` | `/data` (already the Dockerfile default; mount a volume there) |
+| `ALLOWED_ORIGINS` | the Vercel frontend URL, e.g. `https://autostack-in.vercel.app` |
+
+Local Docker run:
+
+```bash
+docker build -f deploy/Dockerfile.worker -t autostack-worker .
+docker run -p 8747:8747 \
+  -e AUTOSTACK_TOKEN=your-token \
+  -e AUTOSTACK_AI_PROVIDER=mock \
+  -v autostack-data:/data \
+  autostack-worker
 ```

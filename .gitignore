@@ -1,9 +1,72 @@
-node_modules/
+# ── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.venv/
+venv/
+env/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
 dist/
-.DS_Store
+build/
+*.egg
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ── Node / Frontend ──────────────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+desktop/node_modules/
+tests/node_modules/
+frontend/dist/
+frontend/.vite/
 *.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Environment & Secrets ────────────────────────────────────────────────
 .env
 .env.*
-__pycache__/
-.venv/
-artifacts/
+!.env.example
+*.pem
+*.key
+*.cert
+
+# ── Runtime artifacts (DB, token, logs, QA scratch) ─────────────────────
+# Ignore everything under the runtime dir, then whitelist the skeleton and
+# the canonical fixture — nothing QA-generated can ever be committed.
+artifacts/**
+!artifacts/.gitkeep
+!artifacts/spike/.gitkeep
+!artifacts/spike/resources/
+!artifacts/spike/resources/sample-tracking-file/
+!artifacts/spike/resources/sample-tracking-file/clients.csv
+
+# ── OS ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# ── IDE ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+.cursor/
+
+# ── Misc ─────────────────────────────────────────────────────────────────
+*.local
+*.log
+
+.vercel
+.env*

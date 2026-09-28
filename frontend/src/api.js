@@ -1,7 +1,7 @@
 // AutoStack worker API client (Spike deliverable: typed wrapper over the v1 contracts).
 // The worker owns every effect; the browser only talks to these endpoints.
 
-const BASE = 'http://127.0.0.1:8747';
+const BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8747';
 let token = '';
 // Session persistence: restore the token at module load so a reload (or app
 // restart) resumes the signed-in session. Invalid/revoked tokens fall out
@@ -64,8 +64,11 @@ export const api = {
   audit: () => request('/api/audit?verify=1&limit=50'),
 
   createPlan: (plan, candidateId) => request('/api/plans', { method: 'POST', body: { plan, candidate_id: candidateId } }),
+  getPlan: (planId) => request(`/api/plans/${encodeURIComponent(planId)}`),
   generate: (planId) => request('/api/artifacts/generate', { method: 'POST', body: { plan_id: planId, approve_generation: true } }),
+  listPlanArtifacts: (planId) => request(`/api/plans/${encodeURIComponent(planId)}/artifacts`),
   createTestJob: (artifactId, consent = true) => request('/api/test-jobs', { method: 'POST', body: { artifact_id: artifactId, fixture: 'reset', consent } }),
+  getTestJob: (jobId) => request(`/api/test-jobs/${encodeURIComponent(jobId)}`),
   approveActivation: (artifactId, jobId) => request('/api/approvals/activation', { method: 'POST', body: { artifact_id: artifactId, job_id: jobId, note: 'approved in app' } }),
   createWorkflowFromPlan: (planId, context) => request(`/api/plan/${encodeURIComponent(planId)}/create-workflow`, { method: 'POST', body: context || {} }),
 

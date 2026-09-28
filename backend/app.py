@@ -92,12 +92,20 @@ async def body_size_limit(request, call_next):  # noqa: ANN001
     return await call_next(request)
 
 # The dashboard (Vite dev server / Electron renderer) is a different origin than the
-# loopback worker. Auth stays token-header based (no cookies), so a scoped origin
-# allowlist is safe; loopback-only binding keeps the blast radius local.
+# worker. Auth stays token-header based (no cookies), so a scoped origin allowlist is
+# safe. Local dev keeps the loopback Vite origins; container deployments (Railway)
+# add trusted origins via the ALLOWED_ORIGINS env var (comma-separated) and any
+# *.vercel.app preview domain matches the regex below. Methods/headers stay scoped.
+import os as _cors_os
+_CORS_DEFAULT_ORIGINS = [
+    "http://localhost:5173", "http://127.0.0.1:5173",
+    "http://localhost:4173", "http://127.0.0.1:4173",
+]
+_CORS_EXTRA = [o.strip() for o in _cors_os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",
-                   "http://localhost:4173", "http://127.0.0.1:4173"],
+    allow_origins=_CORS_DEFAULT_ORIGINS + _CORS_EXTRA,
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -811,7 +819,11 @@ def create_test_job(body: TestJobBody, db: Session = Depends(get_db)):
     art = db.get(GeneratedArtifact, body.artifact_id)
     if art is None:
         raise HTTPException(status_code=404, detail={"error": "artifact not found"})
-    if art.status != "awaiting_test_approval":
+    if art.status == "activated":
+        raise HTTPException(status_code=409, detail={"error": "artifact already activated; re-testing is refused"})
+    # Re-running a sandbox test is allowed while awaiting activation: the sandbox
+    # is isolated and effect-free, so a retry can never bypass the gate.
+    if art.status not in ("awaiting_test_approval", "test_passed"):
         raise HTTPException(status_code=409, detail={"error": f"artifact not testable in state {art.status}"})
     if body.fixture == "reset":
         fixture_payload = (cfg.FIXTURES_DIR / "clients-before.csv").read_bytes()
@@ -858,6 +870,50 @@ def create_test_job(body: TestJobBody, db: Session = Depends(get_db)):
                                             "policy_sha256": report["policy_sha256"]})
     db.commit()
     return {"job_id": job.id, "status": job.status, "report": report}
+
+
+# ── Read-back endpoints (from the deployment repo): the single-worker UI polls
+# plan/artifact/job state between create steps instead of keeping it in memory.
+# Read-only: identity + status, never the generated code.
+
+@app.get("/api/plans/{plan_id}", dependencies=[Depends(require_token)])
+def get_plan(plan_id: str, db: Session = Depends(get_db)):
+    from backend.models import GenerationPlan
+    row = db.get(GenerationPlan, plan_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail={"error": "plan not found"})
+    return {"plan_id": row.id, "status": row.status,
+            "missing_rules": json.loads(row.missing_rules_json),
+            "plan_sha256": row.plan_sha256}
+
+
+@app.get("/api/plans/{plan_id}/artifacts", dependencies=[Depends(require_token)])
+def list_plan_artifacts(plan_id: str, db: Session = Depends(get_db)):
+    from backend.models import GeneratedArtifact, GenerationPlan, TestJob
+    if db.get(GenerationPlan, plan_id) is None:
+        raise HTTPException(status_code=404, detail={"error": "plan not found"})
+    arts = (db.query(GeneratedArtifact)
+            .filter(GeneratedArtifact.plan_id == plan_id)
+            .order_by(GeneratedArtifact.version.desc()).all())
+    out = []
+    for a in arts:
+        jobs = db.query(TestJob).filter(TestJob.artifact_id == a.id).all()
+        last = max(jobs, key=lambda j: j.created_at or "", default=None)
+        out.append({"artifact_id": a.id, "plan_id": a.plan_id, "version": a.version,
+                    "status": a.status,
+                    "last_job": ({"job_id": last.id, "status": last.status} if last else None)})
+    return {"plan_id": plan_id, "artifacts": out}
+
+
+@app.get("/api/test-jobs/{job_id}", dependencies=[Depends(require_token)])
+def get_test_job(job_id: str, db: Session = Depends(get_db)):
+    from backend.models import TestJob
+    row = db.get(TestJob, job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail={"error": "test job not found"})
+    return {"job_id": row.id, "artifact_id": row.artifact_id, "status": row.status,
+            "fixture": row.fixture_name,
+            "report": (json.loads(row.report_json) if row.report_json else None)}
 
 
 def _expected_outputs(rows_list: list[dict], plan: dict, id_field: str) -> list[dict]:
