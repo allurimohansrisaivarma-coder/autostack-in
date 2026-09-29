@@ -401,6 +401,59 @@ html[data-fx="dark"] .btn-hero, [data-theme="dark"] .btn-hero { color: #0b1220; 
 .login-card input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--shadow-focus); }
 button.primary { padding: 10px 16px; border-radius: 10px; font-weight: 600; }
 
+.demo-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 6px 0;
+}
+.demo-divider::before,
+.demo-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border);
+}
+.demo-divider:not(:empty)::before {
+  margin-right: 0.75em;
+}
+.demo-divider:not(:empty)::after {
+  margin-left: 0.75em;
+}
+.btn-demo {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 13.5px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-demo:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.btn-demo:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+.btn-demo:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ─── Workflow execution motion (run nodes timeline) ────────────────────────── */
 .run-node {
   display: flex; align-items: center; gap: 10px;

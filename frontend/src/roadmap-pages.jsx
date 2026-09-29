@@ -42,6 +42,38 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
     }
   }
 
+  async function quickDemo() {
+    if (busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      let issuedToken = null;
+      try {
+        const demoRes = await api.authDemo();
+        issuedToken = demoRes.token;
+      } catch {
+        // Resilient fallback: try issuing token or registering demo user directly
+        try {
+          const t = await api.authIssueToken('demo', 'demo-account-pass-2026', 'demo-dashboard');
+          issuedToken = t.token;
+        } catch {
+          await api.authRegister('demo', 'demo-account-pass-2026', 'Demo Operator', 'operator').catch(() => {});
+          const t = await api.authIssueToken('demo', 'demo-account-pass-2026', 'demo-dashboard');
+          issuedToken = t.token;
+        }
+      }
+      if (!issuedToken) throw new Error('Could not establish demo session');
+      setToken(issuedToken);
+      const me = await api.authMe();
+      setIdentity(me);
+      setPage('landing');
+    } catch (err) {
+      setMsg(err.message || 'Demo sign in failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="login-wrap">
       <form className="card login-card" onSubmit={submit}>
@@ -77,6 +109,19 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
           {busy ? (mode === 'login' ? 'Signing in…' : 'Creating account…')
                 : (mode === 'login' ? 'Sign in' : 'Create account')}
         </MagneticButton>
+        <div className="demo-divider">
+          <span>or instant access</span>
+        </div>
+        <button
+          type="button"
+          className="btn-demo"
+          disabled={busy}
+          onClick={quickDemo}
+          id="btn-demo-account"
+        >
+          <Icon d={ICONS.zap} size={16} />
+          <span>{busy ? 'Launching demo…' : 'Explore with Demo Account'}</span>
+        </button>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <button type="button" className="link" onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}>
             {mode === 'login' ? 'Need an account? Create one' : 'Have an account? Sign in'}

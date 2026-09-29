@@ -216,6 +216,39 @@ def auth_issue_token(body: TokenIssueBody, db: Session = Depends(get_db)):
     return {"token_id": row.id, "token": plaintext, "note": "store this now; it is not shown again"}
 
 
+@router.post("/auth/demo")
+def auth_demo(db: Session = Depends(get_db)):
+    """Instant demo access: signs in as a dedicated 'demo' operator account without manual registration.
+    Idempotent: initializes the demo user on first use, unlocks if previously locked,
+    and returns a fresh session token."""
+    demo_user = db.scalar(select(User).where(User.username == "demo"))
+    if demo_user is None:
+        demo_user = identity.create_user(db, "demo", "demo-account-pass-2026", "Demo Operator")
+        org = teams.primary_org(db) if demo_user.is_admin else teams.ensure_personal_org(db, demo_user)
+        teams.add_member(db, org.id, demo_user.id, "owner")
+        from backend.security import audit as audit_mod
+        audit_mod.append(db, "auth.demo_created", {
+            "user_id": demo_user.id,
+            "username": demo_user.username,
+            "org_id": org.id,
+        })
+        db.commit()
+    else:
+        demo_user.locked_until = None
+        demo_user.failed_attempts = 0
+        db.commit()
+
+    row, plaintext = identity.issue_token(db, demo_user.id, "demo-session")
+    return {
+        "token_id": row.id,
+        "token": plaintext,
+        "username": demo_user.username,
+        "display_name": demo_user.display_name,
+        "user_id": demo_user.id,
+        "is_demo": True,
+    }
+
+
 @router.get("/auth/tokens", dependencies=[Depends(require_principal)])
 def auth_list_tokens(request: Request, db: Session = Depends(get_db)):
     principal = require_principal(request, db)

@@ -73,3 +73,25 @@ def test_health_endpoint_contract(client):
     assert "token" not in body_str
     assert "secret" not in body_str
     assert "\\" not in body_str
+
+
+def test_demo_account_auth(client):
+    """POST /api/auth/demo issues a valid session token for a demo operator."""
+    res = client.post("/api/auth/demo", headers={"Origin": "https://autostack-in.vercel.app"})
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == "https://autostack-in.vercel.app"
+    data = res.json()
+    assert "token" in data
+    assert data["username"] == "demo"
+    assert data["is_demo"] is True
+
+    # Token works with authenticated endpoints
+    me_res = client.get("/api/auth/me", headers={
+        "Authorization": f"Bearer {data['token']}",
+        "Origin": "https://autostack-in.vercel.app",
+    })
+    assert me_res.status_code == 200
+    me_data = me_res.json()
+    assert me_data["user"]["username"] == "demo"
+    assert me_data["role"] in ("owner", "operator")
+

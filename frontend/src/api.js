@@ -96,6 +96,7 @@ export const api = {
   authIssueToken: (username, password, name) =>
     request('/api/auth/tokens', { method: 'POST', body: { username, password, name: name || 'default' } }),
   authMe: () => request('/api/auth/me'),
+  authDemo: () => request('/api/auth/demo', { method: 'POST', body: {} }),
   authListTokens: () => request('/api/auth/tokens'),
   authRevokeToken: (id) => request(`/api/auth/tokens/${encodeURIComponent(id)}/revoke`, { method: 'POST', body: {} }),
 
