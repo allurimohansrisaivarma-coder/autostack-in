@@ -141,10 +141,17 @@ def _persistence_boot_report() -> None:
         )
         print(banner, file=sys.stderr, flush=True)
         if "pytest" not in sys.modules:
-            raise SystemExit(
-                "AutoStack worker refusing to start: data at this location cannot be "
-                "trusted as persistent. Follow the steps in the message above (README: "
-                "'Railway persistence').")
+            if os.environ.get("AUTOSTACK_REQUIRE_PERSISTENT_DATA", "").strip() == "1":
+                raise SystemExit(
+                    "AutoStack worker refusing to start: data at this location cannot be "
+                    "trusted as persistent. Follow the steps in the message above (README: "
+                    "'Railway persistence').")
+            else:
+                print(
+                    "[autostack:persistence] WARNING: Continuing startup without persistent volume. "
+                    "To persist data across redeploys, attach a Railway volume at /data.",
+                    file=sys.stderr,
+                    flush=True)
 
 
 _persistence_boot_report()
