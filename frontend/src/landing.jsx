@@ -219,7 +219,7 @@ function Capabilities() {
         <BentoCard revealDelay={0.08}>
           <div className="bento-icon"><Icon d={ICONS.flow} size={20} /></div>
           <h3>Team operations</h3>
-          <p>Roles for observers, operators, approvers and owners. Every action authorized.</p>
+          <p>Roles for observers, operators, approvers, admins and owners. Every action authorized.</p>
         </BentoCard>
         <BentoCard revealDelay={0.14}>
           <div className="bento-icon"><Icon d={ICONS.db} size={20} /></div>
