@@ -125,7 +125,13 @@ def now_iso() -> str:
 # ─── health & spike primitives ────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "autostack-worker", "ts": now_iso()}
+    """Unauthenticated liveness + persistence visibility. The extra fields are
+    booleans only — never paths, tokens, or DB contents."""
+    persistence = cfg.persistence_summary()
+    return {"status": "ok", "service": "autostack-worker", "ts": now_iso(),
+            "data_dir_configured": persistence["data_dir_configured"],
+            "db_exists": persistence["db_exists"],
+            "persistence_guard": persistence["persistence_guard"]}
 
 
 class PingBody(BaseModel):

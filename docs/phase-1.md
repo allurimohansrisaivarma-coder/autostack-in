@@ -22,7 +22,9 @@ python -m venv .venv
 Activate with `.venv\Scripts\Activate.ps1` in PowerShell, or `source .venv/bin/activate` on macOS/Linux. If PowerShell activation is restricted, call `.venv\Scripts\python.exe` directly instead of changing machine policy.
 
 ```sh
-python -m pip install -r backend/requirements.txt
+python -m pip install -r requirements.txt   # root file — deploy source of truth
+# (backend/requirements.txt is a legacy engine-pinning subset; kept for the
+#  Phase-1 engine-only record — never install from it for a full worker)
 npm run setup
 npm run test:unit
 python -m backend.file_diff tests/fixtures/clients-before.csv tests/fixtures/clients-after.csv

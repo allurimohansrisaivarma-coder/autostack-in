@@ -490,10 +490,10 @@ export function Workflows({ setPage, identity }) {
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
 export function Registry({ identity }) {
-  const isOwner = !!(identity && identity.role === 'owner');
   // Imports create untrusted drafts (a write) — observers are read-only.
   const rank = { observer: 0, operator: 1, approver: 2, admin: 3, owner: 4 }[identity && identity.role] ?? -1;
   const canImport = rank >= 1;
+  const canPublish = rank >= 3; // backend require_publisher: owner OR admin
   const [live, setLive] = useState(null);
   const [search, setSearch] = useState('');
   const [templates, setTemplates] = useState([]);
@@ -548,8 +548,8 @@ export function Registry({ identity }) {
     <div className="screen">
       <div className="screen-header">
         <div>
-          <div className="breadcrumb">Shared Registry</div>
-          <h2>Automation Registry</h2>
+      <div className="breadcrumb">Shared Registry</div>
+      <h2>Automation Registry</h2>
         </div>
         <div className="search-box">
           <Icon d={ICONS.search} size={16} />
@@ -559,7 +559,7 @@ export function Registry({ identity }) {
 
       <div className="info-banner">
         <Icon d={ICONS.package} size={18} />
-        <span>Imports arrive as <b>untrusted drafts</b>: approvals are never inherited, and local tests + activation are always required. Only workflow schemas are shared — never records, credentials, or private paths.</span>
+        <span>Templates are <b>shared with users of this AutoStack deployment</b> — stored in this deployment's own database, not a global marketplace. Imports arrive as <b>untrusted drafts</b>: approvals are never inherited, and local sandbox tests + activation are always required. Only workflow schemas are shared — never records, credentials, or private paths.</span>
       </div>
 
       {msg && (
@@ -571,8 +571,8 @@ export function Registry({ identity }) {
 
       <div className="card">
         <div className="card-header"><strong>Publish one of your workflows</strong></div>
-        <p className="profile-sub">Publication is a separate consent. The registry receives the validated graph and connectors — not your data. Publishing requires the owner role.</p>
-        {isOwner ? (
+        <p className="profile-sub">Publication is a separate consent. The registry receives the validated graph and connectors — not your data. Publishing requires the owner or admin role.</p>
+        {canPublish ? (
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <select value={publishWf} onChange={e => setPublishWf(e.target.value)} style={{ minWidth: 240 }}>
               <option value="">Select workflow…</option>
@@ -584,7 +584,7 @@ export function Registry({ identity }) {
             <button className="btn-dark" disabled={!connected} onClick={doPublish}>Publish</button>
           </div>
         ) : (
-          <p className="muted">Publishing templates requires the owner role — imports stay open to all writers and always arrive as untrusted drafts.</p>
+          <p className="muted">Publishing templates requires the owner or admin role — imports stay open to all writers and always arrive as untrusted drafts.</p>
         )}
       </div>
 
@@ -621,7 +621,7 @@ export function Registry({ identity }) {
         {connected && templates.length === 0 && (
           <div className="card empty-state" style={{ gridColumn: '1/-1' }}>
             <Icon d={ICONS.package} size={28} />
-            <p>No templates published yet. Publish one of your workflows above to share its schema.</p>
+            <p>No templates published yet. Publish one of your workflows above to share its schema with users of this deployment.</p>
           </div>
         )}
         {!connected && (

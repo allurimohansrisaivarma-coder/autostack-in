@@ -81,10 +81,11 @@ Worker step endpoints (read-due / update-row / draft-create / notify → run com
 1. **Capture** — file watchers or manual staging turn CSV drops into `Event`s
    (`source="saved_file_comparison"`, actions `row.added` / `row.removed` / `row.updated`,
    redacted `record_key` like `clients:ID`).
-2. **Plan** — an AI adapter (mock, or Gemini when `AUTOSTACK_AI_PROVIDER=gemini` +
-   `AUTOSTACK_GEMINI_API_KEY` are set) turns the event into a structured plan
-   (`field_mappings`, `eligibility`, `action`, `destinations`). Plans are reviewed by a
-   human before any code exists.
+2. **Plan** — an AI adapter (offline mock by default; Gemini only when
+   `AUTOSTACK_AI_PROVIDER=gemini` AND `AUTOSTACK_GEMINI_KEY` is set — errors fall
+   back to the offline generator, so creation never hard-fails) turns the event into a
+   structured plan (`field_mappings`, `eligibility`, `action`, `destinations`). Plans
+   are reviewed by a human before any code exists.
 3. **Generate** — the plan compiles to a small Python module (`run(rows, ctx)`) that is
    statically validated (module allowlist, banned constructs, size cap) before it is
    ever executed.
@@ -129,7 +130,7 @@ workflow. Copy `.env.example` to `.env` for optional configuration.
 TOK=$(cat artifacts/spike/token)
 AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/qa_probe.py          # 57 checks
 AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/scenario_battery.py  # 31 checks
-.venv/Scripts/python.exe -m pytest tests/ -q                                 # 164 tests + 29 subtests
+.venv/Scripts/python.exe -m pytest tests/ -q                                 # 190 tests + 29 subtests
 ```
 
 ## Environment variables
@@ -139,8 +140,9 @@ AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/scenario_battery.py  # 3
 | `AUTOSTACK_TOKEN`          | persisted token file     | Service bearer token for the worker API. Env wins; otherwise `artifacts/spike/token` is loaded or created (mode `0600`, gitignored). |
 | `AUTOSTACK_AI_PROVIDER`    | `mock`                   | `mock` (deterministic, offline) or `gemini`. Gemini is used only when selected AND a key is present; on any Gemini error (bad key, rate limit, network, timeout, malformed output) generation falls back to the offline generator, so automation creation never hard-errors. |
 | `AUTOSTACK_GEMINI_KEY`     | unset                    | Required when the provider is `gemini`. Keys only via env — never committed. `AUTOSTACK_GEMINI_API_KEY` is accepted as a legacy alias. |
+| `AUTOSTACK_DATA_DIR`       | `artifacts/spike`        | Writable data directory override — set to `/data` in containers (Railway) **on a mounted Volume**. See [Railway persistence](#railway-persistence-required-for-real-deploys). |
+| `AUTOSTACK_REQUIRE_PERSISTENT_DATA` | unset        | `1` = fail fast at boot when the data location cannot be trusted as persistent (auto-enabled on Railway). Set `AUTOSTACK_ALLOW_EMPTY_DATA_DIR=1` for the very first boot on a new empty volume. |
 | `ALLOWED_ORIGINS`          | unset                    | Comma-separated extra CORS origins for the worker API (e.g. the Vercel frontend URL on Railway); `https://*.vercel.app` is always accepted. |
-| `AUTOSTACK_DATA_DIR`       | `artifacts/spike`        | Writable data directory override — set to `/data` in containers (Railway). |
 
 The AI key is read at request time and is never written to the database or logs.
 `artifacts/` (database, token, Node-RED user dir, logs) is fully gitignored.
@@ -157,7 +159,7 @@ The AI key is read at request time and is never written to the database or logs.
 | `.venv/Scripts/python.exe -m pytest tests/ -q`       | Full test suite (isolated throwaway DBs)       |
 | `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/qa_probe.py` | 57-check live-stack probe          |
 | `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/scenario_battery.py` | 31-check live behavioral battery (failure paths, concurrency, triggers, RBAC; self-cleaning) |
-| `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/authz_matrix.py` | 147-check live authorization matrix: one real account per role drives every protected endpoint; escalation/IDOR/token-lifecycle checks |
+| `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/authz_matrix.py` | 165-check live authorization matrix: one real account per role drives every protected endpoint; escalation/IDOR/token-lifecycle checks |
 | `AUTOSTACK_TOKEN=… .venv/Scripts/python.exe scripts/cleanup_dev_junk.py [--apply]` | Soft-delete historical test-junk workflows (dry-run by default) |
 | `.venv/Scripts/python.exe scripts/measure_budgets.py`| Performance budget measurements                |
 
@@ -227,21 +229,34 @@ without ever reading as a hard outline.
 
 ### Roles
 
-Four org roles gate every mutating route: **observer** (read-only) < **operator** (run /
-stage / create workflows / manage triggers / drive bridge callbacks) < **approver**
-(sandbox-test + activate automations) < **owner** (publish / withdraw from registry,
-admin: tier, members, runners, delete workflows). Service tokens (the worker token)
-pass at owner level; user tokens are resolved through team membership. First
-registered local user becomes owner; subsequent registrations join as operator
-(local-first self-serve design) — observers are granted deliberately by an owner.
+Five org roles gate every mutating route (the single resolver is `effective_role()` in
+`backend/teams.py`): **observer** (read-only: dashboards, logs, registry browsing) <
+**operator** (run / stage / create workflows / manage triggers / import registry
+templates / open change requests) < **approver** (sandbox-test + activate automations)
+< **admin** (co-equal with owner for product & governance: create/edit/run/test/
+activate/publish, review & merge change requests, manage members, runners, processes,
+workflow deletion) < **owner** (everything, incl. tier/billing changes via
+`owner_guard` endpoints: org tier, plan conversion, member-role decisions). Service
+tokens (the worker token) pass at owner level; user tokens are resolved through team
+membership. The first registered local user administers the machine (owner of the
+shared workspace); later signups get their **own personal workspace** as owner — an
+optional "Requested role" at signup is stored as a **pending request** for the shared
+workspace (never auto-granted; `owner` is refused outright — no self-elevation), and
+only an owner can approve it.
 
 Enforcement is server-side on every route (verified endpoint-by-endpoint with real
 role accounts — `scripts/authz_matrix.py`): observers get `403` on all writes
-including node callbacks and the trigger tick; operators cannot test/activate or
-publish; approvers cannot publish or administer; only an owner can
-`DELETE /api/workflows/{id}`, publish, or change the org tier. A soft-deleted workflow id can
+including node callbacks and the trigger tick; operators cannot test/activate,
+publish, or administer (they propose through change requests instead); approvers
+cannot publish or administer; owner **or admin** can `DELETE /api/workflows/{id}`
+(`admin_guard`), publish (`require_publisher`), review change requests, and manage
+runners/processes — only an **owner** can change the org tier, convert the plan, or
+approve admin role requests (`owner_guard` endpoints). A soft-deleted workflow id can
 never be reused (no silent resurrection). Token lifecycle: user tokens are issued
 per-user, scoped to that user for revocation, and die immediately on revoke.
+Observers read for free: operator and admin both write, admin additionally governs,
+owner additionally bills. Wrong password, unknown user, and locked accounts all
+return the same unified `401` — the error never reveals which one it was.
 
 ### Organization context: org types, departments, process types
 
@@ -327,7 +342,7 @@ Focus-visible outlines, disabled states, and native form controls adapt per them
 
 | Suite | What it proves | Status |
 |-------|----------------|--------|
-| `pytest tests/` (132 tests + 29 subtests) | Full backend behavior on isolated throwaway DBs: lifecycle, RBAC, sandbox, triggers, registry, privacy, retention, hardening armor | **Passing** |
+| `pytest tests/` (197 tests + 29 subtests) | Full backend behavior on isolated throwaway DBs: lifecycle, RBAC, sandbox, triggers, registry, privacy, retention, hardening armor | **Passing** |
 | `scripts/qa_probe.py` (57 checks) | The live stack end-to-end: worker + Node-RED + all feature surfaces | **Passing** |
 | `scripts/scenario_battery.py` (31 checks) | Behavioral battery against the *running* server: happy path, idempotent rerun, failure path (HTTP 400 + `failed` run + failing node recorded), cancel semantics, invalid inputs, 6-way concurrent exactly-once, webhook auth/fire, schedule tick + once-per-day, RBAC edges, audit `verify=1`; self-cleaning | **Passing** |
 | `scripts/measure_budgets.py` | Idle CPU, resident memory, capture-poll latency vs budgets in `docs/budgets.json` | **Within budget** |
@@ -341,9 +356,11 @@ Focus-visible outlines, disabled states, and native form controls adapt per them
   per-user API tokens (hashed at rest, create/revoke via API). Passwords: PBKDF2-HMAC,
   200 000 iterations, per-user salt; comparisons via `hmac.compare_digest`. Login
   locks for 15 minutes after repeated failures.
-- **Authorization** — role model (observer/operator/approver/owner) enforced on every
+- **Authorization** — role ladder (observer < operator < approver < admin < owner,
+  single resolver `effective_role()` in `backend/teams.py`) enforced on every
   mutating route, including all legacy workflow/run routes and the trigger tick; every
-  read route that returns org data requires a token; admin org actions are owner-only.
+  read route that returns org data requires a token; tier/billing endpoints are
+  owner-only, admin governance endpoints accept owner or admin.
 - **Sandbox** — generated code is statically validated (module allowlist, banned
   constructs, 20 KB cap) *and* executed in a fresh subprocess whose guard blocks sockets
   and strips `open`/`exec`/`eval`/`compile` from the generated code's builtins; POSIX
@@ -362,13 +379,47 @@ Focus-visible outlines, disabled states, and native form controls adapt per them
 
 ## Data handling
 
-SQLite in WAL mode with foreign keys ON, single file at `artifacts/spike/spike.db`;
+SQLite in WAL mode with foreign keys ON, single file at `<AUTOSTACK_DATA_DIR>/spike.db`
+(default `artifacts/spike`, `/data` in the worker container — see
+[Railway persistence](#railway-persistence-required-for-real-deploys));
 hot filter columns are indexed at startup (idempotent `CREATE INDEX IF NOT EXISTS`).
 Deletion of a workflow is a **soft delete** (`deleted_at` timestamp): runs, versions and
 audit history are retained; triggers are disabled; repeat deletes 404; deleting with
 in-flight runs returns 409. Privacy surfaces: processing-purpose ledger, per-category
 retention windows (integer days, validated), and subject data export. Backups are a file
-copy of `artifacts/spike/` while the worker is stopped (WAL checkpoint on clean exit).
+copy of the data directory while the worker is stopped (WAL checkpoint on clean exit) —
+on Railway, **download `spike.db` from the mounted volume before deploying any release
+that changes the DB schema** (startup migrations are additive/idempotent, but a backup
+makes every upgrade reversible).
+
+### Railway persistence (required for real deploys)
+
+All state — user accounts, workflows, runs, the registry, the audit chain — lives in
+SQLite at `<AUTOSTACK_DATA_DIR>/spike.db`. `deploy/Dockerfile.worker` sets
+`AUTOSTACK_DATA_DIR=/data`, but **a container filesystem is ephemeral: without a
+Railway Volume mounted at `/data`, every redeploy wipes every account and workflow.**
+Git cannot attach the volume for you — it is a human step in the Railway UI:
+
+1. **Attach the volume (once, Railway UI):** your service → **Volumes** → attach a
+   volume with mount path `/data`.
+2. **Keep the env vars:** `AUTOSTACK_DATA_DIR=/data` (the Dockerfile default) and your
+   other service variables (`AUTOSTACK_TOKEN`, `ALLOWED_ORIGINS`, AI provider/key).
+3. **Redeploy.** Startup now prints one line per boot:
+   `[autostack:persistence] AUTOSTACK_DATA_DIR=set data_dir=/data db_path=/data/spike.db
+   db_existing (existed_at_boot=True)` — `db_existing` proves the volume is mounted
+   and being reused; `db_NEW` on the second deploy means the volume is NOT attached.
+4. **Register the owner once** after the first durable deploy. From then on, users,
+   workflows, registry entries, and the audit chain survive every rebuild.
+
+Optional belt-and-braces: set `AUTOSTACK_REQUIRE_PERSISTENT_DATA=1` (auto-enabled on
+Railway) and the worker **refuses to boot** when the data location cannot be trusted
+as persistent — no data dir env, or an empty data dir while the guard is required
+(`AUTOSTACK_ALLOW_EMPTY_DATA_DIR=1` permits exactly the first boot on a new volume).
+`GET /api/health` (unauthenticated) reports `data_dir_configured` and `db_exists` so a
+deploy script can assert the volume is really attached — booleans only, never paths
+or contents. Schema-changing releases: back up `spike.db` first (see *Data handling*)
+and review the startup migrations in `backend/app.py`; a full Alembic setup is
+planned but intentionally deferred.
 
 ## Troubleshooting
 
@@ -380,7 +431,7 @@ copy of `artifacts/spike/` while the worker is stopped (WAL checkpoint on clean 
 | Port already in use (`8747`/`18790`/`5173`) | A previous instance is alive: `netstat -ano \| findstr :8747` then `taskkill //F //PID <pid>`. |
 | `no such column: workflows.deleted_at` | One-time migration for pre-existing dev DBs: `sqlite3 artifacts/spike/spike.db "ALTER TABLE workflows ADD COLUMN deleted_at DATETIME"`. Fresh databases are created correctly by `create_all`. |
 | Trigger didn't fire | Triggers must be enabled, the workflow non-deleted, and the loop running (only `scripts/run_worker.py` starts it). Schedule triggers need a due `time_of_day`. Force one pass: `POST /api/triggers/tick` (requires operator role or service token). |
-| AI generation errors | Without `AUTOSTACK_GEMINI_API_KEY`, provider `gemini` fails closed by design. Use the default `mock` provider for offline work. |
+| AI generation errors | Provider `gemini` needs BOTH `AUTOSTACK_AI_PROVIDER=gemini` and `AUTOSTACK_GEMINI_KEY`. On any Gemini error (bad key, rate limit, network, timeout) generation **falls back to the offline generator** (fail-soft): the plan is still produced, marked with a `[fallback:...]` note — Create never hard-crashes. `/api/system/ai-mode` reports which provider was actually used. |
 | Sandbox job `failed` with `NoneType object is not callable` | The generated code tried a blocked builtin (`socket`/`open`/`exec`…). This is the guard working; fix the code, or check `static_check` violations on the artifact. |
 | Run returns HTTP 400 with `run_id` but "failed" status | A caller-caused data violation (missing column, unknown template, missing row). Check the run's node records via `GET /api/runs/{id}/nodes` for the exact node error. |
 | Tests "pollute" the dev DB | They don't — `tests/spike/conftest.py` isolates every test in a throwaway DB. Verify: workflow count is unchanged after `pytest`. |
@@ -396,7 +447,7 @@ Capability status — deliberately explicit:
   exactly-once journal, sandboxed generation/test/approval lifecycle, schedule/file/
   webhook triggers, Node-RED embedded runtime, hash-chained audit + SIEM export,
   privacy ledger/retention/export, registry publish/import/withdraw, teams/roles/
-  invitations, runners pairing, dark/light/system theming, 127-test suite, live
+  invitations, runners pairing, dark/light/system theming, 197-test suite, live
   probe + battery, performance budgets.
 - **Experimental / spike-scoped**: Electron desktop shell (functional, UI polish
   pending), Gemini provider (real API client, requires your own key), paired-runner
@@ -450,8 +501,9 @@ Set the following environment variables on the service:
 | Variable | Value |
 |----------|-------|
 | `AUTOSTACK_TOKEN` | a strong random token (otherwise one is generated and persisted to the volume) |
-| `AUTOSTACK_DATA_DIR` | `/data` (already the Dockerfile default; mount a volume there) |
+| `AUTOSTACK_DATA_DIR` | `/data` (Dockerfile default — **only durable with a Volume mounted at `/data`**, see above) |
 | `ALLOWED_ORIGINS` | the Vercel frontend URL, e.g. `https://autostack-in.vercel.app` |
+| `AUTOSTACK_REQUIRE_PERSISTENT_DATA` | optional `1` — fail fast instead of silently running on ephemeral storage |
 
 Local Docker run:
 
@@ -473,5 +525,7 @@ This project is **source-available under a permission-required license** — see
 evaluation**, but copying, modification, redistribution, production or
 commercial use, and competing forks **all require prior written permission**
 from the copyright holder. This is intentionally **not** an MIT/Apache-style
-open-source license. Permission requests: contact the repository owner via
-[GitHub](https://github.com/allurimohansrisaivarma-coder).
+open-source license. Permission requests:
+
+**Pradyun Kumar Sinha** — [f20240323@dubai.bits-pilani.ac.in](mailto:f20240323@dubai.bits-pilani.ac.in)
+(repository: [allurimohansrisaivarma-coder/autostack-in](https://github.com/allurimohansrisaivarma-coder/autostack-in))

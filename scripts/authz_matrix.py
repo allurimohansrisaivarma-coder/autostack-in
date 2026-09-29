@@ -80,10 +80,10 @@ for role in role_roles:
     s, b = call("POST", "/api/auth/tokens", {"username": uname, "password": PASSWORD})
     assert s == 200, (role, s, b)
     TOKENS[role] = b["token"]
-    # set role via admin API (service principal is admin)
-    s, b = call("GET", "/api/team/members")
-    mid = next(m["membership_id"] for m in b["members"] if m["username"] == uname)
-    s, b = call("POST", f"/api/team/members/{mid}/role", {"role": role})
+    # Affiliation redesign: fresh signups own a PERSONAL workspace, so the
+    # matrix adds each account to the shared workspace explicitly at the
+    # wanted role (owner_guard route; the service principal passes).
+    s, b = call("POST", "/api/team/members", {"username": uname, "role": role})
     assert s == 200, (role, s, b)
     print(f"  {role}: {uname}")
 
@@ -91,9 +91,7 @@ for role in role_roles:
 uname = f"mx-owner-{secrets.token_hex(3)}"
 s, b = call("POST", "/api/auth/register", {"username": uname, "password": PASSWORD})
 assert s == 200, b
-s, b = call("GET", "/api/team/members")
-oid = next(m["membership_id"] for m in b["members"] if m["username"] == uname)
-s, b = call("POST", f"/api/team/members/{oid}/role", {"role": "owner"})
+s, b = call("POST", "/api/team/members", {"username": uname, "role": "owner"})
 assert s == 200, b
 s, b = call("POST", "/api/auth/tokens", {"username": uname, "password": PASSWORD})
 TOKENS["owner"] = b["token"]

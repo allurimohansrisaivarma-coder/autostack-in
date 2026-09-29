@@ -239,7 +239,7 @@ function OrgProfileCard({ isOwner }) {
       ) : profile ? (
         <Row><div>
           {label('org_type', profile.org_type) || '—'} · {label('size', profile.size) || '—'} · {label('department', profile.department) || '—'}
-          {!isOwner && <span className="muted"> (changing it requires the owner role)</span>}
+          {!isOwner && <span className="muted"> (changing it requires the owner or admin role)</span>}
         </div></Row>
       ) : (
         <div className="muted">Loading…</div>

@@ -69,4 +69,5 @@ Desktop.ini
 *.log
 
 .vercel
-.env*
+# NOTE: .env patterns live in the Environment section above (which whitelists
+# .env.example). Do not add a bare .env* here — it would re-ignore the example.

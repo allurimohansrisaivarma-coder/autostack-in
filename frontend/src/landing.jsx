@@ -416,8 +416,9 @@ export function AuthScreen({ children, onSignIn, onSignUp }) {
               switched asset, no filters or glow). */}
           <span className="ah-brand"><ThemeLogo /></span>
           <h1>Automation that earns <span className="grad">trust</span>.</h1>
-          <p>Your account lives on this machine — the first account administers it.
-             Automations run in a sandbox and activate only after human approval.</p>
+          <p>Your account lives on this deployment's database — the first account administers it;
+             after a wipe or fresh volume, register again. Automations run in a sandbox and
+             activate only after human approval.</p>
           <div className="auth-points">
             <span className="ap"><Icon d={ICONS.check} size={15} /> Evidence-based discovery, never invented numbers</span>
             <span className="ap"><Icon d={ICONS.check} size={15} /> Twelve-check sandbox gate before delivery</span>

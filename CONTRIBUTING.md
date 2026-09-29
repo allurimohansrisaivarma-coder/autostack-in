@@ -2,6 +2,14 @@
 
 Thank you for your interest in contributing! Here's everything you need to get started.
 
+> **License note.** AutoStack is **source-available, not open-source**: the repository
+> is public so the code can be **viewed for evaluation**, but copying, modification,
+> redistribution, production or commercial use, and competing forks **require prior
+> written permission** — see [LICENSE](./LICENSE). Sending a pull request grants the
+> copyright holder the right to include your contribution (LICENSE §6); it does not
+> change the project's license. Permission and licensing questions:
+> **Pradyun Kumar Sinha** — [f20240323@dubai.bits-pilani.ac.in](mailto:f20240323@dubai.bits-pilani.ac.in).
+
 ## Prerequisites
 
 - Python 3.11+
@@ -16,6 +24,8 @@ git clone https://github.com/allurimohansrisaivarma-coder/autostack-in.git
 cd autostack-in
 
 # 2. Python environment
+#    (root requirements.txt is the deploy source of truth; backend/requirements.txt
+#     is only a legacy engine-pinning subset — always install from the root file)
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt   # Windows
 # source .venv/bin/activate && pip install -r requirements.txt  # Linux/macOS
@@ -70,4 +80,5 @@ See the **Repository Layout** section in [README.md](README.md) for a full map.
 
 ## Questions?
 
-Open an issue or reach out to the team.
+Open an issue in this repository, or contact the maintainer:
+**Pradyun Kumar Sinha** — [f20240323@dubai.bits-pilani.ac.in](mailto:f20240323@dubai.bits-pilani.ac.in).

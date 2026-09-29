@@ -7,19 +7,116 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# ── Data directory resolution + persistence visibility ───────────────────────
 # AUTOSTACK_DATA_DIR overrides the default local path.
-# In container deployments (Railway) set this to a writable path such as /data.
+# In container deployments (Railway) this is /data (the Dockerfile default),
+# which MUST be a mounted volume — without one, every redeploy wipes the
+# database (users, workflows, registry, audit all live in DATA_DIR/spike.db).
 _env_data = os.environ.get("AUTOSTACK_DATA_DIR", "").strip()
 DATA_DIR: Path = Path(_env_data) if _env_data else REPO_ROOT / "artifacts" / "spike"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# Recorded before mkdir so boot logs can distinguish "DB was already there"
+# (persistent volume reused) from "DB newly created" (fresh/empty volume).
 DB_PATH = DATA_DIR / "spike.db"
+DB_EXISTED_AT_BOOT = DB_PATH.is_file()
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 SNAPSHOTS_DIR = DATA_DIR / "snapshots"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def data_dir_configured() -> bool:
+    """True when AUTOSTACK_DATA_DIR was explicitly set (i.e. the deployment
+    deliberately chose a data location — the prerequisite for it being a
+    mounted persistent volume). Read live (falling back to the boot-time
+    capture) so operators can verify behavior without restarting; never
+    contains the path itself — safe for health/system responses."""
+    return bool(os.environ.get("AUTOSTACK_DATA_DIR", "").strip() or _env_data)
+
+
+def persistence_summary() -> dict:
+    """Deployment-persistence facts that are safe to expose (no paths, no
+    contents): whether the data dir was explicitly configured, whether the
+    database file existed at boot (volume reused vs fresh), and whether a
+    persistence guard is active."""
+    return {
+        "data_dir_configured": data_dir_configured(),
+        "db_exists": DB_EXISTED_AT_BOOT,
+        "persistence_guard": os.environ.get("AUTOSTACK_REQUIRE_PERSISTENT_DATA") == "1",
+    }
+
+
+def _looks_like_railway() -> bool:
+    """Railway injects its service identity into the environment. Used only to
+    pick loud persistence messaging on managed deploys; never grants rights."""
+    return bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("RAILWAY_PROJECT_ID"))
+
+
+def check_persistent_data() -> str | None:
+    """Fail-closed persistence guard (launch requirement: data must survive
+    Railway redeploys).
+
+    The DB lives in DATA_DIR/spike.db. deploy/Dockerfile.worker sets
+    AUTOSTACK_DATA_DIR=/data, but /data is only durable when the operator
+    mounts a Railway VOLUME there. On Railway (or whenever
+    AUTOSTACK_REQUIRE_PERSISTENT_DATA=1) we refuse to boot a container whose
+    data location cannot be trusted as persistent, rather than silently
+    starting with an empty DB that the next redeploy will wipe.
+
+    Returns None when persistence is trusted; otherwise a human-readable
+    reason. Never inspects file contents — only flags and the presence of an
+    explicit data dir."""
+    require = os.environ.get("AUTOSTACK_REQUIRE_PERSISTENT_DATA", "").strip() == "1"
+    if not (require or _looks_like_railway()):
+        return None
+    if not data_dir_configured():
+        return (
+            "AUTOSTACK_DATA_DIR is not set. Persistent storage is required on this "
+            "deployment, but the worker would fall back to a container-local "
+            "directory that redeploys wipe. Operator steps: (1) attach a Railway "
+            "Volume mounted at /data, (2) set AUTOSTACK_DATA_DIR=/data on the "
+            "service, (3) redeploy, (4) register the owner account once — after "
+            "that, users/workflows/audit survive rebuilds.")
+    if not DB_EXISTED_AT_BOOT:
+        if os.environ.get("AUTOSTACK_ALLOW_EMPTY_DATA_DIR", "").strip() == "1":
+            return None  # first deploy on a genuinely new volume — operator opted in
+        return (
+            f"Data directory is configured but {DB_PATH} did not exist at boot — "
+            "the volume looks EMPTY, so this may be a first deploy (fine — register "
+            "the owner once) or a volume attached to the wrong mount point (data "
+            "loss risk on redeploy). AUTOSTACK_REQUIRE_PERSISTENT_DATA=1 refuses "
+            "to continue on an empty data dir; to boot a genuinely new deployment, "
+            "set AUTOSTACK_ALLOW_EMPTY_DATA_DIR=1 for the first deploy only.")
+    return None
+
+
+def _persistence_boot_report() -> None:
+    """Startup visibility + enforcement: log the resolved data location facts
+    once at import (no secrets), then fail fast when the persistence guard
+    trips. Under pytest the function is exercised directly by tests, so import
+    stays warning-only (never kills the suite on operator env vars)."""
+    rail = " railway" if _looks_like_railway() else ""
+    state = "existing" if DB_EXISTED_AT_BOOT else "NEW"
+    print(
+        f"[autostack:persistence]{rail} AUTOSTACK_DATA_DIR={'set' if data_dir_configured() else 'UNSET'} "
+        f"data_dir={DATA_DIR} db_path={DB_PATH} db_{state} (existed_at_boot={DB_EXISTED_AT_BOOT})",
+        flush=True)
+    reason = check_persistent_data()
+    if reason:
+        print(f"[autostack:persistence] CRITICAL: {reason}", file=sys.stderr, flush=True)
+        if "pytest" not in sys.modules:
+            raise SystemExit(
+                "AutoStack worker refusing to start: data at this location cannot be "
+                "trusted as persistent. Follow the steps in the message above (README: "
+                "'Railway persistence').")
+
+
+_persistence_boot_report()
 
 WORKER_HOST = "127.0.0.1"
 WORKER_PORT = 8747

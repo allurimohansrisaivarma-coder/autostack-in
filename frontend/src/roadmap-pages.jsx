@@ -46,7 +46,7 @@ export function Login({ setPage, setIdentity, initialMode = 'login', onBack }) {
     <div className="login-wrap">
       <form className="card login-card" onSubmit={submit}>
         <h2>{mode === 'login' ? 'Sign in to AutoStack' : 'Create your local account'}</h2>
-        <p className="muted">Local-first: your account lives on this machine. The first account administers it.</p>
+        <p className="muted">Local-first: your account lives on this machine's database. The first account administers it. If this deployment's database is wiped or replaced (e.g. a fresh server volume), just register again — the new first account administers the new database.</p>
         <label>Username
           <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required />
         </label>
@@ -391,7 +391,7 @@ export function Teams({ identity }) {
             {procErr && <div className="error">{procErr}</div>}
           </>
         )}
-        {!isOwner && <p className="muted">Creating processes requires the owner role.</p>}
+        {!isOwner && <p className="muted">Creating processes requires the owner or admin role.</p>}
         {processes && processes.processes.map(p => (
           <Row key={p.id}><div>{p.name} <span className="muted">quota/day: {p.run_quota_per_day || 'unlimited'}</span></div></Row>
         ))}
@@ -447,7 +447,7 @@ export function Runners({ identity }) {
             )}
           </>
         ) : (
-          <p className="muted">Registering and pairing runners requires the owner role.</p>
+          <p className="muted">Registering and pairing runners requires the owner or admin role.</p>
         )}
       </Card>
       <Card title="Registered runners">

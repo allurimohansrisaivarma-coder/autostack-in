@@ -168,7 +168,7 @@ harness DOM-shift artifact, stepper is correct), "fresh user can run workflows"
 Full authorization sweep: all 85 routes mapped to their guards, one real account
 per role (observer/operator/approver/owner) created against the LIVE server, and
 every protected endpoint exercised with each role via
-`scripts/authz_matrix.py` (147 checks, all passing after fixes).
+`scripts/authz_matrix.py` (147 checks at the time of the report; now 165 after the affiliation-redesign setup fix — fresh signups are added to the shared workspace explicitly instead of assuming auto-join).
 
 | # | Defect | Root cause | Severity | Fix |
 |---|--------|-----------|----------|-----|
