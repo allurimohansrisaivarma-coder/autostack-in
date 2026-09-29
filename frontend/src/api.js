@@ -69,6 +69,7 @@ export const api = {
   listPlanArtifacts: (planId) => request(`/api/plans/${encodeURIComponent(planId)}/artifacts`),
   createTestJob: (artifactId, consent = true) => request('/api/test-jobs', { method: 'POST', body: { artifact_id: artifactId, fixture: 'reset', consent } }),
   getTestJob: (jobId) => request(`/api/test-jobs/${encodeURIComponent(jobId)}`),
+  rerunTestJob: (jobId, consent = true) => request(`/api/test-jobs/${encodeURIComponent(jobId)}/rerun`, { method: 'POST', body: { consent } }),
   approveActivation: (artifactId, jobId) => request('/api/approvals/activation', { method: 'POST', body: { artifact_id: artifactId, job_id: jobId, note: 'approve-at-create' } }),
   createWorkflowFromPlan: (planId, context) => request(`/api/plan/${encodeURIComponent(planId)}/create-workflow`, { method: 'POST', body: context || {} }),
   openChangeRequest: (body) => request('/api/change-requests', { method: 'POST', body }),

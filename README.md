@@ -137,8 +137,8 @@ AUTOSTACK_TOKEN="$TOK" .venv/Scripts/python.exe scripts/scenario_battery.py  # 3
 | Variable                   | Default                  | Purpose                                                        |
 |----------------------------|--------------------------|----------------------------------------------------------------|
 | `AUTOSTACK_TOKEN`          | persisted token file     | Service bearer token for the worker API. Env wins; otherwise `artifacts/spike/token` is loaded or created (mode `0600`, gitignored). |
-| `AUTOSTACK_AI_PROVIDER`    | `mock`                   | `mock` (deterministic, offline) or `gemini`.                    |
-| `AUTOSTACK_GEMINI_API_KEY` | unset                    | Required when the provider is `gemini`; without a key the adapter fails closed with `GenerationError`. |
+| `AUTOSTACK_AI_PROVIDER`    | `mock`                   | `mock` (deterministic, offline) or `gemini`. Gemini is used only when selected AND a key is present; on any Gemini error (bad key, rate limit, network, timeout, malformed output) generation falls back to the offline generator, so automation creation never hard-errors. |
+| `AUTOSTACK_GEMINI_KEY`     | unset                    | Required when the provider is `gemini`. Keys only via env — never committed. `AUTOSTACK_GEMINI_API_KEY` is accepted as a legacy alias. |
 | `ALLOWED_ORIGINS`          | unset                    | Comma-separated extra CORS origins for the worker API (e.g. the Vercel frontend URL on Railway); `https://*.vercel.app` is always accepted. |
 | `AUTOSTACK_DATA_DIR`       | `artifacts/spike`        | Writable data directory override — set to `/data` in containers (Railway). |
 
@@ -463,3 +463,15 @@ docker run -p 8747:8747 \
   -v autostack-data:/data \
   autostack-worker
 ```
+
+---
+
+## License
+
+This project is **source-available under a permission-required license** — see
+[LICENSE](./LICENSE). The repository is public so the code can be **viewed for
+evaluation**, but copying, modification, redistribution, production or
+commercial use, and competing forks **all require prior written permission**
+from the copyright holder. This is intentionally **not** an MIT/Apache-style
+open-source license. Permission requests: contact the repository owner via
+[GitHub](https://github.com/allurimohansrisaivarma-coder).

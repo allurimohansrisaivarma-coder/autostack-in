@@ -21,6 +21,28 @@ GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{mode
 TIMEOUT_S = 20
 
 
+def gemini_key() -> str:
+    """The configured Gemini API key ('' when absent). Keys only ever come from
+    the environment — never from the DB, the UI, or a committed file.
+    AUTOSTACK_GEMINI_API_KEY is accepted as a legacy alias."""
+    return (os.environ.get("AUTOSTACK_GEMINI_KEY", "")
+            or os.environ.get("AUTOSTACK_GEMINI_API_KEY", ""))
+
+
+def effective_provider() -> tuple[str, str]:
+    """(provider, reason) actually in use after the selection rules.
+
+    Gemini is used ONLY when explicitly selected AND a non-empty key exists;
+    every other configuration resolves to the offline mock, so CI and no-key
+    environments are always deterministic."""
+    selected = os.environ.get("AUTOSTACK_AI_PROVIDER", "mock")
+    if selected == "gemini":
+        if gemini_key():
+            return "gemini", "gemini selected with an API key"
+        return "mock", "gemini selected but no AUTOSTACK_GEMINI_KEY — offline generator"
+    return "mock", "default offline provider"
+
+
 class GenerationError(RuntimeError):
     """Raised when the selected provider cannot produce text (fail-closed)."""
 
@@ -80,9 +102,13 @@ def _synth_code(context: dict) -> str:
 def _gemini_text(prompt: str, context: dict, api_key: str) -> str:
     payload = {
         "contents": [{
-            "parts": [{"text": prompt + "\n\nCONTEXT: " + json.dumps(context, sort_keys=True, default=str)}],
+            "parts": [{"text": prompt + "\n\n" + GEMINI_PROMPT_RULES +
+                       "\n\nCONTEXT (only these confirmed plan rules and retrieved "
+                       "tools — never a full catalog): " +
+                       json.dumps(context, sort_keys=True, default=str)}],
         }],
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 512},
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 512,
+                             "stopSequences": ["```end", "</code>"]},
     }
     req = urllib.request.Request(
         GEMINI_ENDPOINT.format(model=GEMINI_MODEL, key=api_key),
@@ -101,18 +127,65 @@ def _gemini_text(prompt: str, context: dict, api_key: str) -> str:
         raise GenerationError(f"gemini response malformed: {json.dumps(data)[:200]}") from exc
 
 
+GEMINI_PROMPT_RULES = (
+    "Return ONLY one Python function `def run(rows, ctx):` and nothing else — no "
+    "prose, no imports beyond the allowlist csv/io/datetime/re/json, no network, "
+    "no filesystem access, no eval/exec/compile/getattr, no subprocess or os/sys. "
+    "The function filters `rows` (list of dicts) by the eligibility rules in ctx "
+    "and returns a list of small result dicts keyed by the client id field."
+)
+
+
 def generate_text(prompt: str, context: dict | None = None, *, provider: str | None = None,
-                  api_key: str | None = None) -> str:
-    """Generate text through the configured provider. Never raises besides GenerationError."""
+                  api_key: str | None = None, fallback: bool = True) -> str:
+    """Generate text through the configured provider.
+
+    Selection rules: the default provider is the offline deterministic mock; the
+    Gemini provider is used only when explicitly selected AND a key is present.
+    With fallback=True (the engine path), any Gemini failure — network, HTTP,
+    timeout, malformed JSON, bad content — silently degrades to the mock so a
+    misconfigured or rate-limited key can NEVER break automation creation.
+    The returned text is prefixed "[fallback:...]" when a fallback occurred so
+    callers can surface an honest note; strip it with strip_fallback_marker().
+    """
     context = context or {}
-    provider = provider or os.environ.get("AUTOSTACK_AI_PROVIDER", "mock")
+    if provider or api_key is not None:
+        # Explicit caller override (tests): run exactly the requested provider,
+        # errors surface as GenerationError instead of a silent mock fallback.
+        text, used = _generate_with(prompt, context, provider or "mock", api_key or "")
+        return text
+    selected = os.environ.get("AUTOSTACK_AI_PROVIDER", "mock")
+    try:
+        text, _ = _generate_with(prompt, context, selected, gemini_key())
+        return text
+    except GenerationError as exc:
+        if selected != "gemini" or not fallback:
+            raise
+        note = f"live AI unavailable ({str(exc)[:120]}) — used offline generator"
+        mock_text, _ = _generate_with(prompt, context, "mock", "")
+        return f"[fallback:{note}]\n{mock_text}"
+
+
+def strip_fallback_marker(text: str) -> tuple[str, str | None]:
+    """Split a leading '[fallback:...]' marker off generated text.
+
+    Returns (clean_text, note). The note is UI-safe and never contains the key
+    or a stack trace — just the short reason recorded in the audit trail."""
+    if text.startswith("[fallback:"):
+        end = text.find("]")
+        if end > 0:
+            return text[end + 1:].lstrip("\n"), text[len("[fallback:"):end]
+    return text, None
+
+
+def _generate_with(prompt: str, context: dict, provider: str, api_key: str) -> tuple[str, str]:
+    """Single provider attempt. Returns (text, provider_used)."""
     if provider == "mock":
         if context.get("mode") == "code":
-            return "```python\n" + _synth_code(context) + "```\n"
-        return _mock_text(prompt, context)
+            return "```python\n" + _synth_code(context) + "```\n", "mock"
+        return _mock_text(prompt, context), "mock"
     if provider == "gemini":
-        key = api_key or os.environ.get("AUTOSTACK_GEMINI_KEY", "")
-        if not key:
+        if not api_key:
             raise GenerationError("provider gemini selected but no API key configured")
-        return _gemini_text(prompt, context, key)
+        return _gemini_text(prompt, context, api_key), "gemini"
     raise GenerationError(f"unknown AI provider: {provider}")

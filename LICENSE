@@ -1,0 +1,58 @@
+AutoStack IN — Permission-Required Source-Available License
+
+Copyright (c) 2026 allurimohansrisaivarma-coder. All rights reserved.
+
+1. Definition
+   "The Software" means the AutoStack IN source code, documentation, assets, and
+   associated files in this repository, in source or compiled form.
+
+2. Public viewing for evaluation
+   You may view the source code in this public repository for the purpose of
+   evaluating the Software. No other rights are granted by this fact alone.
+
+3. All rights reserved — permission required
+   No part of the Software may be copied, modified, merged, published,
+   distributed, sublicensed, sold, or used to power a production system —
+   in whole or in part, in original or derivative form — without PRIOR
+   WRITTEN PERMISSION from the copyright holder. In particular, and without
+   limitation, the following all require prior written permission:
+
+   a. Production or commercial use of the Software, hosted or embedded;
+   b. Redistribution of the Software or derivatives, in source or binary form;
+   c. Creating forks or derivatives offered as a competing product or service;
+   d. Incorporating the Software, or any part of it, into another project.
+
+4. No implied license
+   Nothing in this repository — including open issues, discussions, commits, or
+   branches — constitutes a grant of any rights beyond those in section 2.
+   Absence of a fee does not imply consent.
+
+5. Requesting permission
+   Permission requests (including internal trials, academic study beyond
+   viewing, integrations, and commercial licensing) may be sent to the
+   repository owner via GitHub:
+
+       GitHub: https://github.com/allurimohansrisaivarma-coder
+       Repository: https://github.com/allurimohansrisaivarma-coder/autostack-in
+
+6. Contributor terms
+   By submitting a pull request or patch, you grant the copyright holder a
+   perpetual, worldwide, royalty-free right to use, modify, and sublicense your
+   contribution as part of the Software, without transferring ownership of the
+   project to you or licensing the whole project back to you.
+
+7. Termination
+   Any right granted in writing terminates automatically if you breach this
+   license. Upon termination you must cease all use and delete all copies.
+
+8. NO WARRANTY; LIMITATION OF LIABILITY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+   IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+This license is deliberately restrictive: the Software is source-available for
+review and evaluation only. It is NOT an open-source license, and it is not
+MIT, Apache-2.0, GPL, or any other approved open-source license.

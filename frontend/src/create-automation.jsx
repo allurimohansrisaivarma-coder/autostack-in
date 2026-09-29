@@ -9,8 +9,21 @@ import { Icon, ICONS, Terminal, stamp } from './main-shared.jsx';
 export function CreateAutomation({ setPage }) {
   // Entry mode: 'step' = existing guided flow; 'ai' = autopilot (goal → plan →
   // sandbox → approve-at-create). Both preserve the 5-step visual flow.
-  const [mode, setMode] = useState(null); // null = chooser not answered
-  const [step, setStep] = useState(1);
+  //
+  // ── Session draft (refresh-safe) ──────────────────────────────────────────
+  // The in-progress creation (mode, step, plan, artifact, job, approval, and
+  // the confirmed context) survives a page reload so the user is never
+  // stranded mid-flow with a silent blank wizard. Everything stays session-
+  // scoped: no tokens or records, just wizard state.
+  const DRAFT_KEY = 'autostack_create_draft_v1';
+  const loadDraft = () => {
+    try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; }
+  };
+  const savedDraft = loadDraft();
+  const draft = (k, fallback) => (savedDraft && savedDraft[k] !== undefined ? savedDraft[k] : fallback);
+
+  const [mode, setMode] = useState(() => draft('mode', null)); // null = chooser not answered
+  const [step, setStep] = useState(() => draft('step', 1));
   const [live, setLive] = useState(null);
   useEffect(() => subscribeLive(setLive), []);
 
@@ -20,21 +33,21 @@ export function CreateAutomation({ setPage }) {
   const [eventCount, setEventCount] = useState(0);
 
   // Step 3: confirmed plan (the only source of eligibility truth).
-  const [candidateId, setCandidateId] = useState(null);
-  const [statusVal, setStatusVal] = useState('Follow-up due');
-  const [dateVal, setDateVal] = useState('2026-09-20');
-  const [actionSel, setActionSel] = useState('create_draft');
-  const [notifySel, setNotifySel] = useState(true);
-  const [planId, setPlanId] = useState(null);
+  const [candidateId, setCandidateId] = useState(() => draft('candidateId', null));
+  const [statusVal, setStatusVal] = useState(() => draft('statusVal', 'Follow-up due'));
+  const [dateVal, setDateVal] = useState(() => draft('dateVal', '2026-09-20'));
+  const [actionSel, setActionSel] = useState(() => draft('actionSel', 'create_draft'));
+  const [notifySel, setNotifySel] = useState(() => draft('notifySel', true));
+  const [planId, setPlanId] = useState(() => draft('planId', null));
   const [planMissing, setPlanMissing] = useState([]);
 
   // Step 4: generation → isolated test → activation approval.
-  const [artifact, setArtifact] = useState(null);
-  const [job, setJob] = useState(null);
-  const [approval, setApproval] = useState(null);
+  const [artifact, setArtifact] = useState(() => draft('artifact', null));
+  const [job, setJob] = useState(() => draft('job', null));
+  const [approval, setApproval] = useState(() => draft('approval', null));
 
   // Step 5: binding to a versioned workflow (+ optional publish).
-  const [bound, setBound] = useState(null);
+  const [bound, setBound] = useState(() => draft('bound', null));
   const [published, setPublished] = useState(false);
 
   // Step 1 context (org type → size → department → process type), from the
@@ -42,16 +55,34 @@ export function CreateAutomation({ setPage }) {
   // Expanded subsections: connectors, tool categories, trigger preference,
   // sensitivity note, target outcome (all stored with the workflow context).
   const [catalog, setCatalog] = useState(null);
-  const [ctxOrgType, setCtxOrgType] = useState('corporate');
-  const [ctxSize, setCtxSize] = useState('medium');
-  const [ctxDept, setCtxDept] = useState('finance');
-  const [ctxProcess, setCtxProcess] = useState('accounts_payable');
-  const [ctxOther, setCtxOther] = useState('');
-  const [ctxConnectors, setCtxConnectors] = useState([]);
-  const [ctxTools, setCtxTools] = useState([]);
-  const [ctxTrigger, setCtxTrigger] = useState('manual');
-  const [ctxSensitivity, setCtxSensitivity] = useState('');
-  const [ctxOutcome, setCtxOutcome] = useState('');
+  const [ctxOrgType, setCtxOrgType] = useState(() => draft('ctxOrgType', 'corporate'));
+  const [ctxSize, setCtxSize] = useState(() => draft('ctxSize', 'medium'));
+  const [ctxDept, setCtxDept] = useState(() => draft('ctxDept', 'finance'));
+  const [ctxProcess, setCtxProcess] = useState(() => draft('ctxProcess', 'accounts_payable'));
+  const [ctxOther, setCtxOther] = useState(() => draft('ctxOther', ''));
+  const [ctxConnectors, setCtxConnectors] = useState(() => draft('ctxConnectors', []));
+  const [ctxTools, setCtxTools] = useState(() => draft('ctxTools', []));
+  const [ctxTrigger, setCtxTrigger] = useState(() => draft('ctxTrigger', 'manual'));
+  const [ctxSensitivity, setCtxSensitivity] = useState(() => draft('ctxSensitivity', ''));
+  const [ctxOutcome, setCtxOutcome] = useState(() => draft('ctxOutcome', ''));
+
+  // Single-writer persistence: every tracked field lands in sessionStorage.
+  const hasDraft = !!savedDraft;
+  const clearDraft = () => { try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } };
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+        mode, step, planId, artifact, job, approval, bound,
+        candidateId, statusVal, dateVal, actionSel, notifySel,
+        ctxOrgType, ctxSize, ctxDept, ctxProcess, ctxOther,
+        ctxConnectors, ctxTools, ctxTrigger, ctxSensitivity, ctxOutcome,
+      }));
+    } catch { /* storage unavailable */ }
+  }, [mode, step, planId, artifact, job, approval, bound,
+      candidateId, statusVal, dateVal, actionSel, notifySel,
+      ctxOrgType, ctxSize, ctxDept, ctxProcess, ctxOther,
+      ctxConnectors, ctxTools, ctxTrigger, ctxSensitivity, ctxOutcome]);
+
   const [connectors, setConnectors] = useState(null);
   const [nodes, setNodes] = useState(null);
   useEffect(() => { api.orgCatalog().then(setCatalog).catch(() => setCatalog(null)); }, []);
@@ -133,7 +164,8 @@ export function CreateAutomation({ setPage }) {
     }
     setPlanMissing([]);
     setPlanId(res.plan_id);
-    setStep(4);
+    // NOTE: no forced setStep here — the footer Next decides when to advance,
+    // so a refused save can never strand the user on Verify without a plan.
     return res;
   }, r => `plan accepted  sha=${(r.plan_sha256 || '').slice(0, 12)}`);
 
@@ -154,6 +186,18 @@ export function CreateAutomation({ setPage }) {
     }
     return j;
   }, 'isolated test passed (subprocess sandbox, plan-derived expected outputs)');
+
+  // One-click re-run for infra failures: same artifact + fixture + policy via
+  // the worker's append-only rerun endpoint (old jobs are never rewritten).
+  const rerunTest = () => gate(async () => {
+    if (!job || !job.job_id) throw new Error('no test job to re-run');
+    const j = await api.rerunTestJob(job.job_id, true);
+    setJob(j);
+    if (j.status !== 'passed') {
+      throw new Error(`isolated test ${j.status} — activation stays blocked`);
+    }
+    return j;
+  }, 'sandbox re-run passed');
 
   const approve = () => gate(async () => {
     const a = await api.approveActivation(artifact.artifact_id, job && job.job_id);
@@ -291,6 +335,53 @@ export function CreateAutomation({ setPage }) {
   const canPublish = rank === null || rank >= 3;
   const isReviewer = rank !== null && rank >= 3;
 
+  // ── Step reachability (fail-closed navigation) ───────────────────────────
+  // Verify (4) is reachable only with a CONFIRMED plan; Bind (5) only with the
+  // activation path complete (Owner/Admin: artifact + sandbox passed + human
+  // approval; Operator: their CR evidence). Unreachable steps are disabled
+  // with an honest tooltip instead of letting users wander into dead ends.
+  const verifyReady = !!planId;
+  const bindReady = !!(planId && artifact && (approval || bound));
+  const canJumpToStep = (target) => {
+    if (target <= 2) return true;                       // context + capture always reachable
+    if (target === 3) return canPlan;                   // plan drafting needs plan rights
+    if (target === 4) return verifyReady;               // never open Verify without a planId
+    if (target === 5) return bindReady;                 // bind/CR only after the gates above
+    return false;
+  };
+  const stepHint = (target) => {
+    if (canJumpToStep(target)) return '';
+    if (target === 3) return 'creating a plan requires the operator role or higher';
+    if (target === 4) return 'confirm the plan on step 3 first';
+    if (target === 5) return canBind
+      ? 'complete generate → sandbox → approval on step 4 first'
+      : 'an owner/admin must complete generate → sandbox → approval first';
+    return 'not reachable yet';
+  };
+
+  // Stable sandbox result class for the Verify rail (falls back to the job
+  // status when the report does not carry an explicit class).
+  const resultClass = job
+    ? (job.result_class || (job.report && job.report.result_class) || (job.status === 'passed' ? 'passed' : null))
+    : null;
+
+  // Footer Next with real validation: never blindly setStep(+1).
+  const nextFromStep = async () => {
+    if (step === 1) { setStep(2); return; }
+    if (step === 2) { setStep(3); return; }
+    if (step === 3) {
+      if (!planId) { const r = await savePlan(); if (!r) return; }  // refused → stay on 3 with the error shown
+      else setStep(4);
+      return;
+    }
+    if (step === 4) {
+      if (!canApprove) { setStep(5); return; }            // operator hands off to review at Bind
+      if (!job || job.status !== 'passed') { setErr('run the sandbox test and let it pass before binding'); return; }
+      if (!approval) { setErr('record the human activation approval before binding'); return; }
+      setStep(5);
+    }
+  };
+
   // Human-readable labels for the context summary chips.
   const ctxLabel = (kind, v) => (catalog && catalog.labels?.[kind]?.[v]) || String(v || '—').replace(/_/g, ' ');
 
@@ -309,10 +400,10 @@ export function CreateAutomation({ setPage }) {
           <h3>How do you want to build this?</h3>
           <p className="muted">Both paths end at the same gates: sandbox first, human approval before anything goes live.</p>
           <div className="publish-actions" style={{ flexWrap: 'wrap' }}>
-            <button className="btn-primary" onClick={() => { setMode('ai'); setStep(1); }}>
+            <button className="btn-primary" onClick={() => { clearDraft(); setMode('ai'); setStep(1); }}>
               <Icon d={ICONS.zap} size={16} /> Build with AI (full workflow)
             </button>
-            <button className="btn-outline" onClick={() => { setMode('step'); }}>
+            <button className="btn-outline" onClick={() => { clearDraft(); setMode('step'); setStep(1); }}>
               Build step by step
             </button>
           </div>
@@ -372,8 +463,14 @@ export function CreateAutomation({ setPage }) {
               <div className="tag-row">
                 <span className="tag">plan {aiResult.plan_id.slice(0, 8)}…</span>
                 <span className="tag">sandbox: {aiResult.sandbox.result_class}{aiResult.sandbox.repaired ? ' (repaired)' : ''}</span>
+                <span className="tag" title={aiResult.provider_note || ''}>
+                  provider: {aiResult.provider || 'mock'}{aiResult.gemini_key_present === false && aiResult.provider === 'mock' ? ' (offline)' : ''}
+                </span>
                 {aiResult.retrieved_tools.slice(0, 4).map(t => <span key={t} className="tag mono">{t.replace('native:', '')}</span>)}
               </div>
+              {aiResult.provider_note && (
+                <p className="muted small">{aiResult.provider_note.includes('unavailable') ? '⚠ ' : ''}{aiResult.provider_note}</p>
+              )}
               <p className="muted small">{aiResult.note}</p>
               {aiResult.sandbox.result_class === 'passed' && isReviewer && (
                 <div className="publish-actions">
@@ -412,9 +509,13 @@ export function CreateAutomation({ setPage }) {
         <div className="stepper-row">
           {['Context', 'Capture', 'Plan', 'Verify', 'Bind & Publish'].map((title, index) => {
             const current = index + 1;
+            const reachable = canJumpToStep(current);
             const stateClass = current < step ? 'done' : current === step ? 'active' : 'todo';
             return (
-              <button key={title} className={`step-item ${stateClass}`} onClick={() => setStep(current)}>
+              <button key={title} className={`step-item ${stateClass}`}
+                      disabled={!reachable}
+                      title={reachable ? `Go to ${title}` : stepHint(current)}
+                      onClick={() => reachable && setStep(current)}>
                 <span>{current}</span>
                 <p>{title}</p>
               </button>
@@ -630,11 +731,15 @@ export function CreateAutomation({ setPage }) {
                 <span>Sandbox testing and activation approval need the <b>approver</b> role — an operator generates code and an approver takes over from step 4. Your role: <b>{role || 'unknown'}</b>.</span>
               </div>
             )}
+            {/* Honest state rail: plan id, generation provider, sandbox
+                result_class, approval status — exactly what the worker knows. */}
             <div className="test-rail">
               {[
-                ['Plan confirmed', !!planId, 'sha-bound'],
-                ['Generated + static validation', !!artifact, artifact ? artifact.code_sha256.slice(0, 12) : 'awaiting generate'],
-                ['Isolated sandbox test', !!(job && job.status === 'passed'), job ? `job ${job.status}` : 'consent-gated'],
+                ['Plan confirmed', !!planId, planId ? `id ${planId.slice(0, 8)}…` : 'confirm the plan on step 3'],
+                ['Generated + static validation', !!artifact,
+                 artifact ? `${artifact.code_sha256.slice(0, 12)}…${artifact.provider ? ` · ${artifact.provider}` : ''}` : 'awaiting generate'],
+                ['Isolated sandbox test', !!(job && job.status === 'passed'),
+                 job ? `${job.status}${job.result_class ? ` · ${job.result_class}` : ''}` : 'consent-gated'],
                 ['Human activation approval', !!approval, approval ? 'recorded' : 'required'],
               ].map(([label, ok, sub], i) => (
                 <div key={label} className={`rail-row ${ok ? 'pass' : busy ? 'run' : 'wait'}`}>
@@ -644,12 +749,24 @@ export function CreateAutomation({ setPage }) {
                 </div>
               ))}
             </div>
+            {artifact && artifact.provider_note && (
+              <p className="muted small" style={{ marginTop: 6 }}>
+                {artifact.provider_note.includes('unavailable') ? '⚠ ' : ''}{artifact.provider_note}
+              </p>
+            )}
             {nodes && nodes.nodes && (
               <div className="detail-section">
                 <div className="detail-label">Worker node catalog ({nodes.nodes.length} types — validated at bind time)</div>
                 {/* Grouped by the catalog's own group field — n8n-style capability
                     surface driven by the SAME source the validator enforces. */}
                 {(() => {
+                  // Permission chips are CAPABILITY METADATA, not per-user locks:
+                  // they name what a node may touch (read-content, write-target,
+                  // draft-create, notify, activate). A padlock appears ONLY when
+                  // the signed-in role is known to lack that capability — so
+                  // owner/admin browse the same catalog without a wall of locks.
+                  const CAP_MIN_RANK = { 'read-content': 1, 'write-target': 1,
+                                         'draft-create': 1, 'notify': 1, 'activate': 2 };
                   const groups = [];
                   for (const n of nodes.nodes) {
                     const g = n.group || 'Other';
@@ -659,12 +776,23 @@ export function CreateAutomation({ setPage }) {
                     <div key={g} style={{ marginBottom: 10 }}>
                       <div className="node-group" style={{ marginBottom: 6 }}>{g}</div>
                       <div className="node-catalog">
-                        {nodes.nodes.filter(n => (n.group || 'Other') === g).map(n => (
-                          <span key={n.type} className="node-chip" title={n.permission ? `permission: ${n.permission}` : 'no special permission'}>
-                            <span className="node-type mono">{n.type}</span>
-                            {n.permission && <span className="node-perm" aria-label={`requires ${n.permission}`}>🔒</span>}
-                          </span>
-                        ))}
+                        {nodes.nodes.filter(n => (n.group || 'Other') === g).map(n => {
+                          const locked = rank !== null &&
+                            rank < (CAP_MIN_RANK[n.permission] ?? 0);
+                          return (
+                            <span key={n.type} className="node-chip"
+                                  title={n.permission
+                                    ? `capability: ${n.permission}${locked ? ' — not available to your role' : ''}`
+                                    : 'no special capability'}>
+                              <span className="node-type mono">{n.type}</span>
+                              {n.permission && (
+                                <span className="node-perm" aria-label={`capability ${n.permission}`}>
+                                  {locked ? '🔒' : n.permission}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
                   ));
@@ -677,12 +805,23 @@ export function CreateAutomation({ setPage }) {
                       title={canApprove ? '' : 'requires the approver role'} onClick={runTest}>2 · Run sandbox test</button>
               <button className="btn-primary" disabled={busy || !job || job.status !== 'passed' || !!approval || !canApprove}
                       title={canApprove ? '' : 'requires the approver role'} onClick={approve}>3 · Approve activation</button>
-              {approval && <button className="btn-dark" onClick={() => setStep(5)}>Continue to bind <Icon d={ICONS.arrow} size={14} /></button>}
-              {!approval && artifact && canPlan && (
-                <button className="btn-dark" title="an approver can also take over from here"
-                        onClick={() => setStep(5)}>Continue to bind <Icon d={ICONS.arrow} size={14} /></button>
+              {resultClass === 'failed_infra' && !approval && (
+                <button className="btn-outline" disabled={busy} onClick={rerunTest}>Re-run test (infra failure)</button>
               )}
+              {approval && <button className="btn-dark" onClick={() => setStep(5)}>Continue to bind <Icon d={ICONS.arrow} size={14} /></button>}
             </div>
+            {!approval && artifact && !canApprove && (
+              <p className="muted small">An owner/admin (or approver) completes the sandbox test and activation approval from here — your result continues as a change request at Bind &amp; Publish.</p>
+            )}
+            {!planId && (
+              <p className="muted small">Generate is locked: complete and <b>confirm the plan on step 3</b> first (Next from step 3 saves it) — generation always runs against a confirmed plan id.</p>
+            )}
+            {resultClass === 'failed_infra' && !approval && (
+              <p className="muted small">The sandbox hit a transient environment problem (infra failure) — your plan and generated code are not blamed. Use “Re-run test” above.</p>
+            )}
+            {resultClass === 'failed_policy' && !approval && (
+              <p className="muted small">The sandbox refused this code on policy grounds (static validation or timeout) — activation stays blocked.</p>
+            )}
             {job && job.report && job.report.checks && (
               <div className="detail-section">
                 <div className="detail-label">Isolated test report (content-bound by sha256)</div>
@@ -734,7 +873,13 @@ export function CreateAutomation({ setPage }) {
 
         <div className="step-actions">
           <button className="btn-outline" onClick={() => setStep(prev => Math.max(1, prev - 1))} disabled={step === 1}>Back</button>
-          {step < 5 && <button className="btn-primary" onClick={() => setStep(prev => Math.min(5, prev + 1))}>Next <Icon d={ICONS.arrow} size={16} /></button>}
+          {step < 5 && (
+            <button className="btn-primary" disabled={busy}
+                    title={step === 3 ? 'saves the plan to the worker before advancing' : ''}
+                    onClick={nextFromStep}>
+              Next <Icon d={ICONS.arrow} size={16} />
+            </button>
+          )}
         </div>
       </div>
       )}

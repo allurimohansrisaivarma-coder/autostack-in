@@ -98,9 +98,14 @@ def plan_run_context(plan: dict) -> dict:
 
 
 def generate(plan: dict) -> dict:
-    """One generation attempt. Returns {model_output, code, sha256, violations}.
+    """One generation attempt. Returns {model_output, code, sha256, violations,
+    provider, provider_note}.
 
     Violations non-empty ⇒ artifact must be stored as `invalid` (never testable).
+    Fail-soft rule: if the selected live provider (Gemini) errors — network,
+    timeout, HTTP, malformed output — the deterministic offline generator is
+    used instead and `provider_note` says so, so automation creation NEVER
+    hard-errors because of the AI vendor.
     """
     missing = validate_plan(plan)
     if missing:
@@ -112,12 +117,42 @@ def generate(plan: dict) -> dict:
                "action": plan["action"],
                "destinations": plan["destinations"],
                "mode": "code"}  # provider must return a runnable run(rows, ctx)
-    model_output = ai.generate_text(GEN_PROMPT, context)
+    try:
+        model_output = ai.generate_text(GEN_PROMPT, context)
+        provider, provider_note = ai.effective_provider()
+    except ai.GenerationError as exc:
+        # Live provider failed outright (unknown provider name or fallback
+        # disabled). Fall back to the deterministic offline synth so the user
+        # can still finish; the note is surfaced in the UI and the audit.
+        model_output = ("```python\n" + ai._synth_code(context) + "```\n")
+        provider, provider_note = "mock", f"live AI unavailable ({str(exc)[:120]}) — used offline generator"
+    model_output, fb_note = ai.strip_fallback_marker(model_output)
+    if fb_note:
+        # generate_text silently fell back to the offline synth: report the
+        # provider honestly as mock, not the provider that was selected.
+        provider, provider_note = "mock", fb_note
     code = extract_code(model_output)
     violations = static_check(code)
+    if violations:
+        # One repair attempt with a stricter prompt before giving up.
+        try:
+            repair_output = ai.generate_text(
+                GEN_PROMPT + " " + ai.GEMINI_PROMPT_RULES +
+                " Your previous attempt was rejected: " + "; ".join(violations) +
+                ". Return ONLY the corrected single function.", context)
+            repair_output, fb_note2 = ai.strip_fallback_marker(repair_output)
+            if fb_note2:
+                provider_note = fb_note2
+            repair_code = extract_code(repair_output)
+            repair_violations = static_check(repair_code)
+            if not repair_violations:
+                code, violations = repair_code, []
+        except ai.GenerationError:
+            pass  # keep the original violations; caller stores the artifact as invalid
     return {"model_output": model_output, "code": code,
             "code_sha256": hashlib.sha256(code.encode()).hexdigest(),
-            "violations": violations}
+            "violations": violations,
+            "provider": provider, "provider_note": provider_note}
 
 
 def extract_code(model_output: str) -> str:

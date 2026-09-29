@@ -855,9 +855,10 @@ def ai_autopilot(body: AutopilotBody, request: Request, db: Session = Depends(ge
     if missing:
         raise HTTPException(status_code=422, detail={"error": "plan incomplete from goal",
                                                      "missing": missing})
-    provider = _os.environ.get("AUTOSTACK_AI_PROVIDER", "mock")
+    from backend.engine import ai as _ai
+    provider, provider_note = _ai.effective_provider()
     audit_mod.append(db, "ai.autopilot_started", {
-        "goal": body.goal[:300], "provider": provider,
+        "goal": body.goal[:300], "provider": provider, "provider_note": provider_note,
         "retrieved_tools": tool_ids, "org_type": body.org_type,
         "department": body.department})
     db.commit()
@@ -869,8 +870,19 @@ def ai_autopilot(body: AutopilotBody, request: Request, db: Session = Depends(ge
                           status="approved_for_generation", created_at=datetime.now(timezone.utc))
     db.add(prow)
     db.commit()
-    # 4) generate + static validation
-    outcome = gen.generate(plan)
+    # 4) generate + static validation. Fail-soft: the AI vendor can never break
+    # creation — generate() itself falls back to the offline synth; this guard
+    # is the last-resort net so even an unexpected provider error is a clean
+    # 502 the UI can show, not a crash.
+    try:
+        outcome = gen.generate(plan)
+    except _ai.GenerationError as exc:
+        raise HTTPException(status_code=502, detail={
+            "error": "live AI provider unavailable — retry or configure AUTOSTACK_AI_PROVIDER=mock",
+            "provider_error": str(exc)[:200]})
+    provider_note = outcome.get("provider_note") or provider_note
+    # Report the provider actually USED (a runtime fallback demotes gemini → mock).
+    provider = outcome.get("provider") or provider
     if outcome["violations"]:
         raise HTTPException(status_code=422, detail={"error": "static validation failed",
                                                      "violations": outcome["violations"]})
@@ -924,7 +936,10 @@ def ai_autopilot(body: AutopilotBody, request: Request, db: Session = Depends(ge
                                status="approved_for_generation", created_at=datetime.now(timezone.utc))
         db.add(prow2)
         db.commit()
-        outcome2 = gen.generate(plan2)
+        try:
+            outcome2 = gen.generate(plan2)
+        except _ai.GenerationError:
+            outcome2 = {"violations": ["provider unavailable during repair"]}  # keep first attempt
         art2 = GeneratedArtifact(id=str(uuid.uuid4()), plan_id=prow2.id, version=1,
                                  model_output_json=json.dumps({"output": outcome2["model_output"][:4000]}),
                                  code=outcome2["code"], code_sha256=outcome2["code_sha256"],
@@ -942,6 +957,7 @@ def ai_autopilot(body: AutopilotBody, request: Request, db: Session = Depends(ge
         "plan_sha256": prow.plan_sha256[:16], "artifact_id": art.id,
         "artifact_sha256": art.code_sha256[:16], "result_class": result_class,
         "attempts": attempts, "repaired": repaired, "provider": provider,
+        "provider_note": provider_note,
         "retrieved_tools": tool_ids})
     db.commit()
     context = {"org_type": body.org_type, "size": body.size, "department": body.department,
@@ -954,6 +970,8 @@ def ai_autopilot(body: AutopilotBody, request: Request, db: Session = Depends(ge
                         "attempts": attempts, "repaired": repaired,
                         "checks": report.get("checks", [])},
             "retrieved_tools": tool_ids, "context": context,
+            "provider": provider, "provider_note": provider_note,
+            "gemini_key_present": bool(_ai.gemini_key()),
             "note": ("sandbox passed — approve activation now to bind, or open a change request"
                      if result_class == "passed" else
                      "sandbox did not pass; nothing is activated and no bind is possible")}
@@ -1655,11 +1673,16 @@ def connectors_inventory(db: Session = Depends(get_db)):
 
 @router.get("/system/ai-mode", dependencies=[Depends(require_principal)])
 def system_ai_mode():
-    """Where the 'model status' answer comes from: provider actually in use."""
+    """Where the 'model status' answer comes from: provider actually in use.
+    Gemini counts as active only when selected AND a key is present — otherwise
+    the worker honestly reports the offline deterministic generator."""
+    from backend.engine import ai as _ai
     provider = os.environ.get("AUTOSTACK_AI_PROVIDER", "mock")
-    return {"provider": provider,
-            "deterministic_offline": provider == "mock",
-            "gemini_key_present": bool(os.environ.get("AUTOSTACK_GEMINI_KEY", ""))}
+    effective, note = _ai.effective_provider()
+    return {"provider": provider, "effective_provider": effective,
+            "provider_note": note,
+            "deterministic_offline": effective == "mock",
+            "gemini_key_present": bool(_ai.gemini_key())}
 
 
 # ── B3: trigger firing (schedules + file-arrival) & B4: workflow deletion ─────

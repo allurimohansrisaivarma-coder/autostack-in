@@ -811,6 +811,13 @@ def generate_artifact(body: GenerateBody, db: Session = Depends(get_db)):
         outcome = gen.generate(plan)
     except gen.PlanError as exc:
         raise HTTPException(status_code=422, detail={"error": str(exc)})
+    except gen.ai.GenerationError as exc:
+        # The live provider could not be reached at all (fail-soft fell back
+        # everywhere possible; this is the belt-and-braces guard so creation
+        # never 500s because of the AI vendor).
+        raise HTTPException(status_code=502, detail={
+            "error": "live AI provider unavailable — retry or configure AUTOSTACK_AI_PROVIDER=mock",
+            "provider_error": str(exc)[:200]})
     version = (db.query(GeneratedArtifact)
                .filter(GeneratedArtifact.plan_id == plan_row.id)
                .count()) + 1
@@ -825,10 +832,14 @@ def generate_artifact(body: GenerateBody, db: Session = Depends(get_db)):
     db.commit()
     audit_mod.append(db, "artifact.generated", {"artifact_id": art.id, "version": version,
                                                 "status": art.status,
-                                                "violations": outcome["violations"]})
+                                                "violations": outcome["violations"],
+                                                "provider": outcome.get("provider"),
+                                                "provider_note": outcome.get("provider_note")})
     db.commit()
     return {"artifact_id": art.id, "version": version, "status": art.status,
-            "violations": outcome["violations"], "code_sha256": art.code_sha256}
+            "violations": outcome["violations"], "code_sha256": art.code_sha256,
+            "provider": outcome.get("provider"),
+            "provider_note": outcome.get("provider_note")}
 
 
 # ─── Phase 6: consent → isolated test → report → separate activation approval ─
