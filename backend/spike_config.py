@@ -176,17 +176,28 @@ def _load_or_persist_token() -> str:
     if env:
         return env
     token_file = DATA_DIR / "token"
-    if token_file.is_file():
-        value = token_file.read_text(encoding="utf-8").strip()
-        if value:
-            return value
-    value = new_token()
-    token_file.write_text(value, encoding="utf-8")
     try:
-        token_file.chmod(0o600)
-    except OSError:
-        pass
-    return value
+        if token_file.is_file():
+            try:
+                value = token_file.read_text(encoding="utf-8").strip()
+                if value:
+                    return value
+            except (OSError, PermissionError):
+                pass
+        value = new_token()
+        try:
+            token_file.write_text(value, encoding="utf-8")
+            try:
+                token_file.chmod(0o666)
+            except OSError:
+                pass
+        except (OSError, PermissionError):
+            pass
+        return value
+    except Exception as exc:
+        print(f"[autostack:token] Warning: token file access failed ({exc}); using in-memory token",
+              file=sys.stderr, flush=True)
+        return new_token()
 
 
 SPIKE_TOKEN = _load_or_persist_token()
