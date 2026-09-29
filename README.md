@@ -392,34 +392,23 @@ on Railway, **download `spike.db` from the mounted volume before deploying any r
 that changes the DB schema** (startup migrations are additive/idempotent, but a backup
 makes every upgrade reversible).
 
-### Railway persistence (required for real deploys)
+### Production (Vercel + Railway)
 
 All state — user accounts, workflows, runs, the registry, the audit chain — lives in
-SQLite at `<AUTOSTACK_DATA_DIR>/spike.db`. `deploy/Dockerfile.worker` sets
-`AUTOSTACK_DATA_DIR=/data`, but **a container filesystem is ephemeral: without a
-Railway Volume mounted at `/data`, every redeploy wipes every account and workflow.**
-Git cannot attach the volume for you — it is a human step in the Railway UI:
+SQLite at `<AUTOSTACK_DATA_DIR>/spike.db`. Container filesystems are ephemeral:
+**without a Railway Volume mounted at `/data`, every redeploy wipes all data.**
+Git cannot attach the volume for you — it is an operator step in the Railway UI.
 
-1. **Attach the volume (once, Railway UI):** your service → **Volumes** → attach a
-   volume with mount path `/data`.
-2. **Keep the env vars:** `AUTOSTACK_DATA_DIR=/data` (the Dockerfile default) and your
-   other service variables (`AUTOSTACK_TOKEN`, `ALLOWED_ORIGINS`, AI provider/key).
-3. **Redeploy.** Startup now prints one line per boot:
-   `[autostack:persistence] AUTOSTACK_DATA_DIR=set data_dir=/data db_path=/data/spike.db
-   db_existing (existed_at_boot=True)` — `db_existing` proves the volume is mounted
-   and being reused; `db_NEW` on the second deploy means the volume is NOT attached.
-4. **Register the owner once** after the first durable deploy. From then on, users,
-   workflows, registry entries, and the audit chain survive every rebuild.
+#### Exact Railway Configuration Steps:
+1. **Volume on worker at `/data`**: In Railway dashboard, go to the worker service → **Volumes** → **Add Volume** with mount path `/data`.
+2. **`AUTOSTACK_DATA_DIR=/data`**: In service **Variables**, configure `AUTOSTACK_DATA_DIR=/data` (`deploy/Dockerfile.worker` defaults to this path).
+3. **Optional `ALLOWED_ORIGINS=https://autostack-in.vercel.app`**: Add your Vercel frontend URL (all `*.vercel.app` domains are also permitted by default in code).
+4. **Redeploy and verify health**: Trigger a redeploy; confirm `GET /api/health` returns HTTP 200 `{"status":"ok",...}` (not 502).
+5. **First empty DB**: Register the organization owner account once in the UI. From then on, user accounts, workflows, and audit history survive all future redeploys.
+6. **If guard blocks first boot**: On a brand new empty volume, the persistence guard refuses to boot without confirmation to prevent accidental data loss. Set `AUTOSTACK_ALLOW_EMPTY_DATA_DIR=1` in service Variables for the first deploy to initialize `spike.db`, then attach/verify the volume and remove the hatch.
 
-Optional belt-and-braces: set `AUTOSTACK_REQUIRE_PERSISTENT_DATA=1` (auto-enabled on
-Railway) and the worker **refuses to boot** when the data location cannot be trusted
-as persistent — no data dir env, or an empty data dir while the guard is required
-(`AUTOSTACK_ALLOW_EMPTY_DATA_DIR=1` permits exactly the first boot on a new volume).
-`GET /api/health` (unauthenticated) reports `data_dir_configured` and `db_exists` so a
-deploy script can assert the volume is really attached — booleans only, never paths
-or contents. Schema-changing releases: back up `spike.db` first (see *Data handling*)
-and review the startup migrations in `backend/app.py`; a full Alembic setup is
-planned but intentionally deferred.
+`GET /api/health` (unauthenticated) reports safe status flags (`data_dir_configured`, `db_exists`, `persistence_guard`) so operators and automated monitors can verify volume status without exposing paths or secrets. Schema-changing releases: back up `spike.db` from the volume first (see *Data handling*) and review startup migrations in `backend/app.py`.
+
 
 ## Troubleshooting
 

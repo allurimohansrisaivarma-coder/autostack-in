@@ -106,6 +106,7 @@ import os as _cors_os
 _CORS_DEFAULT_ORIGINS = [
     "http://localhost:5173", "http://127.0.0.1:5173",
     "http://localhost:4173", "http://127.0.0.1:4173",
+    "https://autostack-in.vercel.app",
 ]
 _CORS_EXTRA = [o.strip() for o in _cors_os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
@@ -113,8 +114,8 @@ app.add_middleware(
     allow_origins=_CORS_DEFAULT_ORIGINS + _CORS_EXTRA,
     allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "*"],
 )
 
 

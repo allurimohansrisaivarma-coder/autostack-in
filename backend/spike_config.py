@@ -44,10 +44,14 @@ def persistence_summary() -> dict:
     contents): whether the data dir was explicitly configured, whether the
     database file existed at boot (volume reused vs fresh), and whether a
     persistence guard is active."""
+    guard_active = bool(
+        os.environ.get("AUTOSTACK_REQUIRE_PERSISTENT_DATA", "").strip() == "1"
+        or _looks_like_railway()
+    )
     return {
         "data_dir_configured": data_dir_configured(),
         "db_exists": DB_EXISTED_AT_BOOT,
-        "persistence_guard": os.environ.get("AUTOSTACK_REQUIRE_PERSISTENT_DATA") == "1",
+        "persistence_guard": guard_active,
     }
 
 
@@ -102,13 +106,40 @@ def _persistence_boot_report() -> None:
     stays warning-only (never kills the suite on operator env vars)."""
     rail = " railway" if _looks_like_railway() else ""
     state = "existing" if DB_EXISTED_AT_BOOT else "NEW"
+    guard_active = bool(
+        os.environ.get("AUTOSTACK_REQUIRE_PERSISTENT_DATA", "").strip() == "1"
+        or _looks_like_railway()
+    )
     print(
         f"[autostack:persistence]{rail} AUTOSTACK_DATA_DIR={'set' if data_dir_configured() else 'UNSET'} "
-        f"data_dir={DATA_DIR} db_path={DB_PATH} db_{state} (existed_at_boot={DB_EXISTED_AT_BOOT})",
+        f"data_dir={DATA_DIR} db_path={DB_PATH} db_{state} (existed_at_boot={DB_EXISTED_AT_BOOT}) "
+        f"persistence_guard={'active' if guard_active else 'inactive'}",
         flush=True)
     reason = check_persistent_data()
     if reason:
-        print(f"[autostack:persistence] CRITICAL: {reason}", file=sys.stderr, flush=True)
+        banner = (
+            "\n" + "=" * 78 + "\n"
+            "CRITICAL AUTOSTACK STARTUP ERROR: PERSISTENCE GUARD TRIPPED\n"
+            "=" * 78 + "\n"
+            f"  Environment:        {'Railway' if _looks_like_railway() else 'Production / Guarded'}\n"
+            f"  AUTOSTACK_DATA_DIR: {'set (' + str(DATA_DIR) + ')' if data_dir_configured() else 'UNSET'}\n"
+            f"  DB_PATH:            {DB_PATH}\n"
+            f"  DB Existed At Boot: {DB_EXISTED_AT_BOOT}\n"
+            f"  Persistence Guard:  ACTIVE\n"
+            "-" * 78 + "\n"
+            f"REASON:\n  {reason}\n"
+            "-" * 78 + "\n"
+            "OPERATOR FIX FOR RAILWAY:\n"
+            "  1. Attach a persistent volume mounted at /data on the worker service.\n"
+            "  2. In Railway service Variables, set:\n"
+            "       AUTOSTACK_DATA_DIR=/data\n"
+            "  3. For FIRST DEPLOY on a new/empty volume only, temporarily set:\n"
+            "       AUTOSTACK_ALLOW_EMPTY_DATA_DIR=1\n"
+            "  4. Redeploy -> worker starts -> register the owner account once.\n"
+            "  5. Once /data/spike.db exists, remove AUTOSTACK_ALLOW_EMPTY_DATA_DIR.\n"
+            "=" * 78 + "\n"
+        )
+        print(banner, file=sys.stderr, flush=True)
         if "pytest" not in sys.modules:
             raise SystemExit(
                 "AutoStack worker refusing to start: data at this location cannot be "
